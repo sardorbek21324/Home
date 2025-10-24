@@ -1,0 +1,182 @@
+[
+  {
+    "name": "Уборка дома",
+    "kind": "main",
+    "base_points": 10,
+    "freq": "daily",
+    "response_window_minutes": 40,
+    "execution_window_minutes": 90,
+    "min_points": 9,
+    "max_points": 15
+  },
+  {
+    "name": "Пылесос",
+    "kind": "main",
+    "base_points": 8,
+    "freq": "daily",
+    "response_window_minutes": 30,
+    "execution_window_minutes": 60,
+    "min_points": 7,
+    "max_points": 12
+  },
+  {
+    "name": "Приготовить еду",
+    "kind": "main",
+    "base_points": 10,
+    "freq": "daily",
+    "response_window_minutes": 40,
+    "execution_window_minutes": 90,
+    "min_points": 9,
+    "max_points": 15
+  },
+  {
+    "name": "Посудa",
+    "kind": "main",
+    "base_points": 5,
+    "freq": "3_per_day",
+    "response_window_minutes": 30,
+    "execution_window_minutes": 40,
+    "min_points": 4,
+    "max_points": 7
+  },
+  {
+    "name": "Туалет",
+    "kind": "main",
+    "base_points": 10,
+    "freq": "weekly",
+    "response_window_minutes": 60,
+    "execution_window_minutes": 60,
+    "min_points": 9,
+    "max_points": 12
+  },
+  {
+    "name": "Ванная",
+    "kind": "main",
+    "base_points": 10,
+    "freq": "weekly",
+    "response_window_minutes": 60,
+    "execution_window_minutes": 60,
+    "min_points": 9,
+    "max_points": 12
+  },
+  {
+    "name": "Мусор",
+    "kind": "main",
+    "base_points": 4,
+    "freq": "daily",
+    "response_window_minutes": 20,
+    "execution_window_minutes": 30,
+    "min_points": 3,
+    "max_points": 6
+  },
+  {
+    "name": "Продукты",
+    "kind": "main",
+    "base_points": 12,
+    "freq": "weekly",
+    "response_window_minutes": 120,
+    "execution_window_minutes": 180,
+    "min_points": 10,
+    "max_points": 14
+  },
+  {
+    "name": "Зеркало в ванной",
+    "kind": "mini",
+    "base_points": 3,
+    "freq": "2-3_days",
+    "response_window_minutes": 30,
+    "execution_window_minutes": 30,
+    "min_points": 2,
+    "max_points": 4
+  },
+  {
+    "name": "Зеркала в шкафах",
+    "kind": "mini",
+    "base_points": 3,
+    "freq": "2-3_days",
+    "response_window_minutes": 30,
+    "execution_window_minutes": 30,
+    "min_points": 2,
+    "max_points": 4
+  },
+  {
+    "name": "Расставить обувь",
+    "kind": "mini",
+    "base_points": 2,
+    "freq": "daily",
+    "response_window_minutes": 15,
+    "execution_window_minutes": 20,
+    "min_points": 2,
+    "max_points": 3
+  },
+  {
+    "name": "Убрать стол",
+    "kind": "mini",
+    "base_points": 3,
+    "freq": "daily",
+    "response_window_minutes": 15,
+    "execution_window_minutes": 20,
+    "min_points": 2,
+    "max_points": 4
+  },
+  {
+    "name": "Сменить полотенце в ванной",
+    "kind": "mini",
+    "base_points": 4,
+    "freq": "weekly",
+    "response_window_minutes": 60,
+    "execution_window_minutes": 60,
+    "min_points": 3,
+    "max_points": 5
+  },
+  {
+    "name": "Сменить кухонное полотенце",
+    "kind": "mini",
+    "base_points": 4,
+    "freq": "weekly",
+    "response_window_minutes": 60,
+    "execution_window_minutes": 60,
+    "min_points": 3,
+    "max_points": 5
+  },
+  {
+    "name": "Проверить холодильник",
+    "kind": "mini",
+    "base_points": 5,
+    "freq": "weekly",
+    "response_window_minutes": 60,
+    "execution_window_minutes": 60,
+    "min_points": 4,
+    "max_points": 6
+  },
+  {
+    "name": "Протереть пыль",
+    "kind": "mini",
+    "base_points": 4,
+    "freq": "2-3_days",
+    "response_window_minutes": 30,
+    "execution_window_minutes": 40,
+    "min_points": 3,
+    "max_points": 5
+  },
+  {
+    "name": "Университет (посетить)",
+    "kind": "external",
+    "base_points": 15,
+    "freq": "2_per_week",
+    "response_window_minutes": 360,
+    "execution_window_minutes": 120,
+    "min_points": 10,
+    "max_points": 20
+  },
+  {
+    "name": "Спортзал",
+    "kind": "external",
+    "base_points": 20,
+    "freq": "3_per_week",
+    "response_window_minutes": 360,
+    "execution_window_minutes": 180,
+    "min_points": 12,
+    "max_points": 25
+  }
+]
