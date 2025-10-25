@@ -36,32 +36,53 @@ from ..utils.time import (
 )
 
 
-_SCHEDULER: AsyncIOScheduler | None = None
-
-
-def init_scheduler(tz: str) -> AsyncIOScheduler:
-    """Initialise singleton AsyncIOScheduler with the given timezone."""
-
-    global _SCHEDULER
-    if _SCHEDULER is None:
-        _SCHEDULER = AsyncIOScheduler(
-            timezone=ZoneInfo(tz),
-            job_defaults={
-                "coalesce": True,
-                "max_instances": 1,
-                "misfire_grace_time": 60,
-            },
-        )
-        _SCHEDULER.start()
-    return _SCHEDULER
+_scheduler: AsyncIOScheduler | None = None
+_lifecycle_controller: "BotScheduler | None" = None
 
 
 def get_scheduler() -> AsyncIOScheduler:
-    """Return initialised scheduler or raise if not ready."""
+    """Lazily create or return the shared AsyncIO scheduler instance."""
 
-    if _SCHEDULER is None:
-        raise RuntimeError("Scheduler not initialized")
-    return _SCHEDULER
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = AsyncIOScheduler(
+            timezone=ZoneInfo(settings.TZ),
+            job_defaults={
+                "coalesce": True,
+                "max_instances": 1,
+                "misfire_grace_time": 120,
+            },
+        )
+    return _scheduler
+
+
+def start_scheduler() -> None:
+    """Start the shared scheduler if it is not already running."""
+
+    scheduler = get_scheduler()
+    if not scheduler.running:
+        scheduler.start()
+
+
+def shutdown_scheduler() -> None:
+    """Shutdown the shared scheduler without waiting for jobs."""
+
+    scheduler = get_scheduler()
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+
+
+def set_lifecycle_controller(controller: "BotScheduler | None") -> None:
+    """Remember the lifecycle controller for handlers access."""
+
+    global _lifecycle_controller
+    _lifecycle_controller = controller
+
+
+def get_lifecycle_controller() -> "BotScheduler | None":
+    """Return previously registered lifecycle controller if any."""
+
+    return _lifecycle_controller
 
 
 log = logging.getLogger(__name__)
@@ -72,20 +93,18 @@ class BotScheduler:
 
     def __init__(self, bot, scheduler: AsyncIOScheduler | None = None) -> None:
         self.bot = bot
-        self.scheduler = scheduler or init_scheduler(settings.TZ)
+        self.scheduler = scheduler or get_scheduler()
         self.quiet_hours = parse_quiet_hours(settings.QUIET_HOURS)
 
     def start(self) -> None:
-        if not self.scheduler.running:
-            self.scheduler.start()
+        start_scheduler()
         from .lifecycle import schedule_daily_jobs
 
         schedule_daily_jobs(self.bot)
         log.info("Scheduler started")
 
     def shutdown(self) -> None:
-        if self.scheduler.running:
-            self.scheduler.shutdown(wait=False)
+        shutdown_scheduler()
 
     def _job_id(self, kind: str, instance_id: int) -> str:
         return f"{kind}:{instance_id}"

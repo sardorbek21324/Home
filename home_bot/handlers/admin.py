@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from aiogram import Bot, Router
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -30,6 +30,7 @@ from ..db.repo import (
     session_scope,
 )
 from ..services.scoring import reward_for_completion
+from ..services.scheduler import get_lifecycle_controller
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -39,8 +40,8 @@ router = Router()
 log = logging.getLogger(__name__)
 
 
-def _get_scheduler(bot: Bot) -> "BotScheduler | None":
-    return getattr(bot, "lifecycle", None)
+def _get_scheduler() -> "BotScheduler | None":
+    return get_lifecycle_controller()
 
 
 def _require_admin(message: Message) -> bool:
@@ -65,7 +66,7 @@ async def manual_announce(message: Message) -> None:
             return
         instance_id = instance.id
 
-    lifecycle = _get_scheduler(message.bot)
+    lifecycle = _get_scheduler()
     if lifecycle is None:
         await message.answer("Планировщик не активен.")
         return

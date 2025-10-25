@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -7,7 +8,7 @@ from ..config import settings
 
 try:
     from openai import OpenAI
-except Exception:
+except Exception:  # pragma: no cover - optional dependency
     OpenAI = None
 
 
@@ -49,7 +50,7 @@ def weekly_patch(summary_json: dict) -> dict:
     messages = [
         {"role": "system", "content": "Be concise and safe. Do not include PII."},
         {"role": "user", "content": prompt},
-        {"role": "user", "content": json.dumps(summary_json)}
+        {"role": "user", "content": json.dumps(summary_json)},
     ]
     try:
         res = client.chat.completions.create(model="gpt-4o-mini", messages=messages, temperature=0.4)
@@ -91,3 +92,20 @@ async def draft_announce(template_title: str, points: int, bonus_hint: str) -> s
     except Exception as exc:  # pragma: no cover - network
         log.info("OpenAI draft announce failed: %s", exc)
         return default_text
+
+
+async def quick_ai_ping() -> str:
+    """Perform a lightweight API call to verify OpenAI availability."""
+
+    if not settings.OPENAI_API_KEY or OpenAI is None:
+        return "AI: ключ не задан — пропускаю."
+    try:
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        await asyncio.to_thread(
+            client.responses.create,
+            model="gpt-4o-mini",
+            input="ping",
+        )
+        return "AI: ok"
+    except Exception as exc:  # pragma: no cover - network
+        return f"AI: ошибка — {exc.__class__.__name__}"
