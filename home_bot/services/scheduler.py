@@ -43,7 +43,14 @@ def init_scheduler(tz: str) -> AsyncIOScheduler:
 
     global _SCHEDULER
     if _SCHEDULER is None:
-        _SCHEDULER = AsyncIOScheduler(timezone=ZoneInfo(tz))
+        _SCHEDULER = AsyncIOScheduler(
+            timezone=ZoneInfo(tz),
+            job_defaults={
+                "coalesce": True,
+                "max_instances": 1,
+                "misfire_grace_time": 0,
+            },
+        )
         _SCHEDULER.start()
     return _SCHEDULER
 

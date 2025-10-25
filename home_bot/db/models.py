@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import date, datetime
 from enum import Enum as PyEnum
 from typing import Optional
 
@@ -94,6 +94,8 @@ class TaskInstance(Base):
     deferrals_used: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_announce_at: Mapped[datetime | None] = mapped_column(DateTime)
+    round_no: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     template: Mapped[TaskTemplate] = relationship(back_populates="instances")
     report: Mapped[Optional["Report"]] = relationship(back_populates="task_instance", uselist=False)
