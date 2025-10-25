@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
 from ..db.models import TaskInstance, TaskStatus, User, Vote, VoteValue
@@ -20,6 +20,7 @@ from ..db.repo import (
 )
 from ..services.scoring import reward_for_completion
 from ..services.notifications import update_verification_messages
+from ..services.scheduler import get_lifecycle_controller
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -29,8 +30,8 @@ router = Router()
 log = logging.getLogger(__name__)
 
 
-def _get_scheduler(bot: Bot) -> "BotScheduler | None":
-    return getattr(bot, "lifecycle", None)
+def _get_scheduler() -> "BotScheduler | None":
+    return get_lifecycle_controller()
 
 
 @router.callback_query(F.data.startswith("vote:"))
@@ -83,7 +84,7 @@ async def handle_vote(cb: CallbackQuery) -> None:
         template_title = instance.template.title
         total_votes = yes + no
 
-        lifecycle = _get_scheduler(cb.bot)
+        lifecycle = _get_scheduler()
         if lifecycle and expected_votes:
             if total_votes >= expected_votes:
                 lifecycle.cancel_vote_deadline(instance.id)

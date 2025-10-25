@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
@@ -26,6 +26,7 @@ from ..services.notifications import (
     send_verification_requests,
     update_after_claim,
 )
+from ..services.scheduler import get_lifecycle_controller
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -35,8 +36,8 @@ router = Router()
 log = logging.getLogger(__name__)
 
 
-def _get_scheduler(bot: Bot) -> "BotScheduler | None":
-    return getattr(bot, "lifecycle", None)
+def _get_scheduler() -> "BotScheduler | None":
+    return get_lifecycle_controller()
 
 
 def _format_task(instance: TaskInstance) -> str:
@@ -146,7 +147,7 @@ async def claim_task(cb: CallbackQuery) -> None:
         claimer_name=cb.from_user.full_name,
         template_title=template_title,
     )
-    lifecycle = _get_scheduler(cb.bot)
+    lifecycle = _get_scheduler()
     if lifecycle:
         lifecycle.cancel_open_jobs(instance_id)
     deadline_log = deadline.isoformat() if deadline else "unknown"
@@ -197,7 +198,7 @@ async def cancel_task(cb: CallbackQuery) -> None:
 
     await cb.message.edit_text("Бронь снята. Задача снова доступна всем.")
     await cb.answer("Отменено")
-    lifecycle = _get_scheduler(cb.bot)
+    lifecycle = _get_scheduler()
     if lifecycle:
         lifecycle.cancel_open_jobs(instance_id)
         await lifecycle.announce_instance(instance_id, penalize=False)
@@ -281,7 +282,7 @@ async def handle_photo(message: Message) -> None:
         recipients=recipients,
     )
 
-    lifecycle = _get_scheduler(message.bot)
+    lifecycle = _get_scheduler()
     if lifecycle:
         lifecycle.cancel_open_jobs(instance_id)
         lifecycle.schedule_vote_deadline(instance_id)

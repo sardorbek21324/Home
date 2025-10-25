@@ -2,45 +2,48 @@
 
 from __future__ import annotations
 
+from zoneinfo import ZoneInfo
+
 from aiogram import Bot
 from apscheduler.triggers.cron import CronTrigger
 
-from .scheduler import get_scheduler
+from ..config import settings
+from .scheduler import get_lifecycle_controller, get_scheduler
 
 
 def schedule_daily_jobs(bot: Bot) -> None:
     """Ensure core periodic jobs are scheduled on the shared scheduler."""
 
     scheduler = get_scheduler()
-    lifecycle = getattr(bot, "lifecycle", None)
+    lifecycle = get_lifecycle_controller()
     if lifecycle is None:  # pragma: no cover - configuration guard
         raise RuntimeError("Lifecycle controller is not attached to the bot")
 
+    tz = ZoneInfo(settings.TZ)
+    common = dict(
+        coalesce=True,
+        misfire_grace_time=120,
+        max_instances=1,
+        replace_existing=True,
+    )
+
     scheduler.add_job(
         lifecycle.generate_today_tasks,
-        CronTrigger(hour=4, minute=0),
+        CronTrigger(hour=4, minute=0, timezone=tz),
         id="tasks:daily",
-        replace_existing=True,
-        misfire_grace_time=60,
-        coalesce=True,
+        **common,
     )
     scheduler.add_job(
         lifecycle.check_missed_tasks,
         "interval",
         minutes=10,
         id="tasks:missed",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=60,
+        **common,
     )
     scheduler.add_job(
         lifecycle.check_vote_deadlines,
         "interval",
         minutes=5,
         id="tasks:votes",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=60,
+        **common,
     )

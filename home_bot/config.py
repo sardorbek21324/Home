@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable, List
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _parse_ids(env_value: str) -> List[int]:
+    """Parse comma separated identifiers from environment variables."""
+
+    if not env_value:
+        return []
+    return [int(chunk.strip()) for chunk in env_value.split(",") if chunk.strip().isdigit()]
 
 
 def _coerce_admin_ids(value: Any) -> list[int]:
@@ -32,10 +41,9 @@ def _coerce_admin_ids(value: Any) -> list[int]:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"ADMIN_IDS JSON parse error: {exc}") from exc
+            raise ValueError("ADMIN_IDS JSON parse error") from exc
         return _coerce_admin_ids(parsed)
 
-    # allow comma separated values
     if "," in text:
         return [int(chunk.strip()) for chunk in text.split(",") if chunk.strip()]
 
@@ -61,7 +69,7 @@ class Settings(BaseSettings):
     TZ: str = "Europe/Warsaw"
     QUIET_HOURS: str = "23:00-08:00"
 
-    model_config = SettingsConfigDict(env_prefix="", env_file=None, case_sensitive=False)
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", case_sensitive=False)
 
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
@@ -81,7 +89,10 @@ class Settings(BaseSettings):
         return value
 
 
-settings = Settings()  # type: ignore[arg-type]
+settings = Settings(
+    ADMIN_IDS=_parse_ids(os.getenv("ADMIN_IDS", "")),
+    FAMILY_IDS=_parse_ids(os.getenv("FAMILY_IDS", "")),
+)
 
 
 def get_family_user_ids() -> List[int]:

@@ -15,9 +15,13 @@ from datetime import date
 
 from .config import settings
 from .db.repo import init_db, seed_templates, session_scope
-from .handlers import admin, common, menu, score, tasks, verification
+from .handlers import admin, common, diagnostics, menu, score, tasks, verification
 from .handlers.start import router as start_router
-from .services.scheduler import BotScheduler, init_scheduler, load_seed_templates
+from .services.scheduler import (
+    BotScheduler,
+    load_seed_templates,
+    set_lifecycle_controller,
+)
 from .utils.logging import setup_logging
 
 
@@ -52,6 +56,7 @@ async def run_bot() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
+    dp.workflow_data.update({"settings": settings})
     dp.include_router(start_router)
     dp.include_router(menu.router)
     dp.include_router(common.router)
@@ -59,29 +64,30 @@ async def run_bot() -> None:
     dp.include_router(tasks.router)
     dp.include_router(verification.router)
     dp.include_router(admin.router)
+    dp.include_router(diagnostics.router)
 
-    shared_scheduler = init_scheduler(settings.TZ)
-    bot.scheduler = shared_scheduler
-
-    scheduler = BotScheduler(bot, shared_scheduler)
-    bot.lifecycle = scheduler
+    scheduler = BotScheduler(bot)
+    set_lifecycle_controller(scheduler)
     scheduler.start()
     await scheduler.generate_tasks_for_day(date.today())
 
     await set_commands(bot)
-
-    while True:
-        try:
-            await dp.start_polling(bot)
-        except TelegramRetryAfter as exc:
-            delay = exc.retry_after + 1
-            logging.getLogger(__name__).warning("Telegram rate limit. Sleep %s s", delay)
-            await asyncio.sleep(delay)
-        except TelegramNetworkError as exc:
-            logging.getLogger(__name__).warning("Network issue: %s", exc, exc_info=True)
-            await asyncio.sleep(5)
-        else:
-            break
+    try:
+        while True:
+            try:
+                await dp.start_polling(bot)
+            except TelegramRetryAfter as exc:
+                delay = exc.retry_after + 1
+                logging.getLogger(__name__).warning("Telegram rate limit. Sleep %s s", delay)
+                await asyncio.sleep(delay)
+            except TelegramNetworkError as exc:
+                logging.getLogger(__name__).warning("Network issue: %s", exc, exc_info=True)
+                await asyncio.sleep(5)
+            else:
+                break
+    finally:
+        scheduler.shutdown()
+        set_lifecycle_controller(None)
 
 
 def main() -> None:
