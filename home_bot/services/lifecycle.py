@@ -21,7 +21,7 @@ def schedule_daily_jobs(bot: Bot) -> None:
         CronTrigger(hour=4, minute=0),
         id="tasks:daily",
         replace_existing=True,
-        misfire_grace_time=0,
+        misfire_grace_time=60,
     )
     scheduler.add_job(
         lifecycle.check_missed_tasks,
