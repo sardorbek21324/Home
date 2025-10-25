@@ -1,62 +1,224 @@
-from . import SessionLocal, engine, Base
-from .models import *
-from sqlalchemy.orm import Session
-from typing import Iterable, Optional
+"""Repository helpers on top of SQLAlchemy sessions."""
 
-def init_db():
+from __future__ import annotations
+
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
+from typing import Iterable, Iterator, Sequence
+
+from sqlalchemy import and_, func, select
+from sqlalchemy.orm import Session
+
+from . import Base, SessionLocal, engine
+from .models import (
+    Dispute,
+    DisputeState,
+    Report,
+    ScoreEvent,
+    TaskFrequency,
+    TaskInstance,
+    TaskKind,
+    TaskStatus,
+    TaskTemplate,
+    User,
+    Vote,
+    VoteValue,
+)
+
+
+def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
-def get_session() -> Session:
-    return SessionLocal()
 
-def upsert_user(session: Session, telegram_id: int, name: str, nickname: str | None, role: Role) -> User:
-    u = session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
-    if u is None:
-        u = User(telegram_id=telegram_id, name=name, nickname=nickname, role=role)
-        session.add(u)
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    session = SessionLocal()
+    try:
+        yield session
         session.commit()
-        session.refresh(u)
-    else:
-        u.name = name
-        if nickname is not None:
-            u.nickname = nickname
-        session.commit()
-    return u
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-def list_users(session: Session) -> list[User]:
-    return session.query(User).all()
 
-def get_user_by_tid(session: Session, telegram_id: int) -> Optional[User]:
-    return session.query(User).filter_by(telegram_id=telegram_id).one_or_none()
+def ensure_user(session: Session, tg_id: int, name: str, username: str | None) -> User:
+    user = session.scalar(select(User).where(User.tg_id == tg_id))
+    if user:
+        user.name = name
+        user.username = username
+        return user
 
-def get_or_create_tasks_from_seed(session: Session, seed: Iterable[dict]):
-    name_to_task = {t.name: t for t in session.query(Task).all()}
-    for d in seed:
-        if d["name"] not in name_to_task:
-            t = Task(
-                name=d["name"], kind=TaskKind(d["kind"]), base_points=d["base_points"],
-                freq=d["freq"], response_window_minutes=d["response_window_minutes"],
-                execution_window_minutes=d["execution_window_minutes"],
-                min_points=d["min_points"], max_points=d["max_points"]
+    user = User(tg_id=tg_id, name=name, username=username)
+    session.add(user)
+    session.flush()
+    return user
+
+
+def list_users(session: Session) -> Sequence[User]:
+    return session.scalars(select(User).order_by(User.id)).all()
+
+
+def get_user_by_tg(session: Session, tg_id: int) -> User | None:
+    return session.scalar(select(User).where(User.tg_id == tg_id))
+
+
+def add_score_event(session: Session, user: User, delta: int, reason: str, *, task_instance: TaskInstance | None = None) -> None:
+    event = ScoreEvent(user=user, delta=delta, reason=reason, task_instance=task_instance)
+    user.score += delta
+    session.add(event)
+    session.flush()
+
+
+def reset_month(session: Session, season_label: str) -> User | None:
+    users = session.scalars(select(User)).all()
+    if not users:
+        return None
+    winner = max(users, key=lambda u: u.score)
+    for user in users:
+        if user.score:
+            session.add(
+                ScoreEvent(
+                    user=user,
+                    delta=-user.score,
+                    reason=f"Сезон {season_label}: обнуление",
+                    season=season_label,
+                )
             )
-            session.add(t)
-    session.commit()
+            user.score = 0
+    return winner
 
-def create_instance(session: Session, task: Task) -> TaskInstance:
-    inst = TaskInstance(task_id=task.id, state=InstanceState.announced)
-    session.add(inst); session.commit(); session.refresh(inst)
-    return inst
 
-def find_task_by_name(session: Session, name: str) -> Optional[Task]:
-    return session.query(Task).filter(Task.name == name).one_or_none()
+def seed_templates(session: Session, payload: Iterable[dict[str, object]]) -> None:
+    existing_codes = {code for (code,) in session.execute(select(TaskTemplate.code))}
+    for entry in payload:
+        code = str(entry["code"])
+        if code in existing_codes:
+            continue
+        template = TaskTemplate(
+            code=code,
+            title=str(entry["title"]),
+            base_points=int(entry["base_points"]),
+            frequency=TaskFrequency(str(entry["frequency"])),
+            max_per_day=int(entry["max_per_day"]) if entry.get("max_per_day") else None,
+            sla_minutes=int(entry["sla_minutes"]),
+            claim_timeout_minutes=int(entry["claim_timeout_minutes"]),
+            kind=TaskKind(str(entry["kind"])),
+            nobody_claimed_penalty=int(entry.get("nobody_claimed_penalty", 0)),
+            deferral_penalty_pct=int(entry.get("deferral_penalty_pct", 20)),
+        )
+        session.add(template)
 
-def get_task(session: Session, task_id: int) -> Task | None:
-    return session.query(Task).get(task_id)
 
-def get_instance(session: Session, instance_id: int) -> TaskInstance | None:
-    return session.query(TaskInstance).get(instance_id)
+def create_instance(
+    session: Session,
+    template: TaskTemplate,
+    *,
+    day: date,
+    slot: int,
+    status: TaskStatus = TaskStatus.open,
+) -> TaskInstance:
+    instance = TaskInstance(template=template, day=day, slot=slot, status=status)
+    session.add(instance)
+    session.flush()
+    return instance
 
-def save_history(session: Session, user_id: int, instance_id: int | None, delta: int, reason: str):
-    h = History(user_id=user_id, task_instance_id=instance_id, delta=delta, reason=reason)
-    session.add(h)
-    session.commit()
+
+def upcoming_instances(session: Session, *, from_dt: datetime) -> Sequence[TaskInstance]:
+    return session.scalars(
+        select(TaskInstance)
+        .where(TaskInstance.created_at >= from_dt)
+        .order_by(TaskInstance.created_at)
+    ).all()
+
+
+def find_open_instances(session: Session) -> Sequence[TaskInstance]:
+    return session.scalars(
+        select(TaskInstance)
+        .where(TaskInstance.status.in_([TaskStatus.open, TaskStatus.reserved]))
+        .order_by(TaskInstance.created_at)
+    ).all()
+
+
+def reserve_instance(session: Session, instance: TaskInstance, user: User, *, defer: bool, defer_minutes: int) -> None:
+    instance.status = TaskStatus.reserved
+    instance.assigned_to = user.id
+    instance.deferrals_used = instance.deferrals_used + (1 if defer else 0)
+    if defer:
+        instance.reserved_until = datetime.utcnow() + timedelta(minutes=defer_minutes)
+    else:
+        instance.reserved_until = datetime.utcnow()
+    instance.attempts += 1
+    session.flush()
+
+
+def submit_report(session: Session, instance: TaskInstance, user: User, file_id: str) -> Report:
+    report = Report(task_instance=instance, user=user, photo_file_id=file_id)
+    instance.status = TaskStatus.report_submitted
+    session.add(report)
+    session.flush()
+    return report
+
+
+def register_vote(session: Session, instance: TaskInstance, voter: User, value: VoteValue) -> Vote:
+    vote = Vote(task_instance=instance, voter=voter, value=value)
+    session.add(vote)
+    session.flush()
+    return vote
+
+
+def votes_summary(session: Session, instance: TaskInstance) -> tuple[int, int]:
+    counts = session.execute(
+        select(Vote.value, func.count()).where(Vote.task_instance_id == instance.id).group_by(Vote.value)
+    ).all()
+    yes = next((count for value, count in counts if value == VoteValue.yes), 0)
+    no = next((count for value, count in counts if value == VoteValue.no), 0)
+    return yes, no
+
+
+def open_dispute(session: Session, instance: TaskInstance, opened_by: User, note: str | None = None) -> Dispute:
+    dispute = Dispute(task_instance=instance, opened_by=opened_by.id, note=note)
+    instance.status = TaskStatus.rejected
+    session.add(dispute)
+    session.flush()
+    return dispute
+
+
+def resolve_dispute(session: Session, dispute: Dispute, resolved_by: User, note: str, *, approve: bool) -> None:
+    dispute.state = DisputeState.resolved
+    dispute.resolved_by = resolved_by.id
+    dispute.resolved_at = datetime.utcnow()
+    dispute.note = note
+    instance = dispute.task_instance
+    instance.status = TaskStatus.approved if approve else TaskStatus.rejected
+    session.flush()
+
+
+def pending_vote_instances(session: Session) -> Sequence[TaskInstance]:
+    return session.scalars(
+        select(TaskInstance)
+        .where(TaskInstance.status == TaskStatus.report_submitted)
+        .order_by(TaskInstance.created_at)
+    ).all()
+
+
+def available_templates(session: Session, *, kind: TaskKind | None = None) -> Sequence[TaskTemplate]:
+    stmt = select(TaskTemplate).order_by(TaskTemplate.title)
+    if kind:
+        stmt = stmt.where(TaskTemplate.kind == kind)
+    return session.scalars(stmt).all()
+
+
+def todays_history(session: Session, user: User) -> Sequence[ScoreEvent]:
+    today = datetime.utcnow().date()
+    return session.scalars(
+        select(ScoreEvent)
+        .where(
+            and_(
+                ScoreEvent.user_id == user.id,
+                func.date(ScoreEvent.created_at) == today,
+            )
+        )
+        .order_by(ScoreEvent.created_at.desc())
+    ).all()
