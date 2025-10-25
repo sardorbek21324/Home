@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from aiohttp import ClientTimeout
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import BotCommand
@@ -15,7 +17,7 @@ from datetime import date
 
 from .config import settings
 from .db.repo import init_db, seed_templates, session_scope
-from .handlers import admin, common, diagnostics, menu, score, tasks, verification
+from .handlers import admin, common, diagnostics, id as id_handler, menu, score, tasks, verification
 from .handlers.start import router as start_router
 from .services.scheduler import (
     BotScheduler,
@@ -37,8 +39,14 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="me", description="Мой баланс"),
         BotCommand(command="history", description="История"),
         BotCommand(command="help", description="Помощь"),
+        BotCommand(command="myid", description="Показать мой Telegram ID"),
     ]
-    await bot.set_my_commands(commands)
+    try:
+        await bot.set_my_commands(commands)
+    except Exception as exc:  # pragma: no cover - network
+        logging.getLogger(__name__).warning(
+            "Skip set_my_commands due to network issue: %s", exc
+        )
 
 
 async def run_bot() -> None:
@@ -51,13 +59,16 @@ async def run_bot() -> None:
     with session_scope() as session:
         seed_templates(session, load_seed_templates())
 
+    session = AiohttpSession(timeout=ClientTimeout(total=20))
     bot = Bot(
         token=settings.BOT_TOKEN,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
     dp.workflow_data.update({"settings": settings})
     dp.include_router(start_router)
+    dp.include_router(id_handler.router)
     dp.include_router(menu.router)
     dp.include_router(common.router)
     dp.include_router(score.router)

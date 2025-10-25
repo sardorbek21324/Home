@@ -10,6 +10,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
+from ..config import settings
 from ..db.models import TaskInstance, TaskStatus, User
 from ..db.repo import (
     add_score_event,
@@ -229,6 +230,7 @@ async def handle_photo(message: Message) -> None:
     if message.from_user is None:
         return
     auto_reject = False
+    rejection_text = "Фото получено. Проверяющих нет, отчёт отклонён."
     recipients: list[tuple[int, int]] = []
     instance_id = None
     template_title = ""
@@ -256,16 +258,25 @@ async def handle_photo(message: Message) -> None:
         submit_report(session, instance, user, file_id)
         template_title = instance.template.title
         instance_id = instance.id
+        configured_family = list(settings.FAMILY_IDS)
         family = [member for member in family_users(session) if member.id != user.id and member.tg_id]
         recipients = [(member.id, int(member.tg_id)) for member in family]
         instance.round_no = len(recipients)
-        if instance.round_no == 0:
-            instance.status = TaskStatus.rejected
+        if not configured_family:
+            log.info("No family members to notify.")
             auto_reject = True
+            rejection_text = "❌ Нет доступных проверяющих — отчёт отклонён автоматически."
+        elif len(configured_family) == 1:
+            auto_reject = True
+            rejection_text = "❌ Нет доступных проверяющих — отчёт отклонён автоматически."
+        elif instance.round_no == 0:
+            auto_reject = True
+        if auto_reject:
+            instance.status = TaskStatus.rejected
         session.flush()
 
     if auto_reject:
-        await message.answer("Фото получено. Проверяющих нет, отчёт отклонён.")
+        await message.answer(rejection_text)
         log.info(
             "Report auto-rejected for instance %s: no reviewers", instance_id
         )
