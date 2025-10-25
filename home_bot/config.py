@@ -19,20 +19,16 @@ def _default_database_url() -> str:
 
 
 def _parse_ids(env_value: str | None, fallback: list[int]) -> list[int]:
-    """Parse comma or JSON-separated identifiers with sensible fallbacks."""
-
     if not env_value:
         return fallback
-
-    text = env_value.strip()
-    if not text:
+    s = env_value.strip()
+    if not s:
         return fallback
-
     try:
-        if text.startswith("["):
-            data = json.loads(text)
-            return [int(item) for item in data if str(item).strip()]
-        return [int(chunk) for chunk in text.split(",") if chunk.strip()]
+        if s.startswith("["):
+            arr = json.loads(s)
+            return [int(x) for x in arr]
+        return [int(x) for x in s.split(",") if x.strip()]
     except Exception:
         return fallback
 
@@ -55,23 +51,23 @@ class Settings(BaseSettings):
     TZ: str = "Europe/Warsaw"
     QUIET_HOURS: str = "23:00-08:00"
 
+    ADMIN_IDS_ENV: str | None = Field(default_factory=lambda: os.getenv("ADMIN_IDS"))
+    FAMILY_IDS_ENV: str | None = Field(default_factory=lambda: os.getenv("FAMILY_IDS"))
+
     model_config = SettingsConfigDict(
         env_prefix="",
         env_file=".env",
         case_sensitive=False,
-        protected_namespaces=("_",),
+        protected_namespaces=(),
     )
-
-    _ADMIN_IDS_RAW: str | None = os.getenv("ADMIN_IDS")
-    _FAMILY_IDS_RAW: str | None = os.getenv("FAMILY_IDS")
 
     @property
     def ADMIN_IDS(self) -> list[int]:
-        return _parse_ids(self._ADMIN_IDS_RAW, ADMIN_IDS_DEFAULT)
+        return _parse_ids(self.ADMIN_IDS_ENV, ADMIN_IDS_DEFAULT)
 
     @property
     def FAMILY_IDS(self) -> list[int]:
-        return _parse_ids(self._FAMILY_IDS_RAW, FAMILY_IDS_DEFAULT)
+        return _parse_ids(self.FAMILY_IDS_ENV, FAMILY_IDS_DEFAULT)
 
 
 settings = Settings()

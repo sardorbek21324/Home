@@ -47,7 +47,7 @@ async def show_rating(message: Message) -> None:
     await message.answer("\n".join(lines))
 
 
-@router.message(Command(commands=["balance", "me"]))
+@router.message(Command("balance", "me"))
 async def show_balance(message: Message) -> None:
     if message.from_user is None:
         return
