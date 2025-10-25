@@ -29,30 +29,34 @@ from .handlers import (
 )
 from .handlers.start import router as start_router
 from .services.scheduler import (
-    BotScheduler,
     load_seed_templates,
     set_lifecycle_controller,
+    shared_scheduler,
 )
+from .services import family as family_service
 from .utils.logging import setup_logging
 
 
 bot: Bot | None = None
 dp: Dispatcher | None = None
-scheduler: BotScheduler | None = None
 
 
 async def set_commands(bot: Bot) -> None:
     commands = [
+        BotCommand(command="start", description="Запустить бота и показать меню"),
         BotCommand(command="menu", description="Открыть меню"),
-        BotCommand(command="tasks", description="Список задач"),
-        BotCommand(command="me", description="Мой баланс"),
-        BotCommand(command="history", description="История"),
+        BotCommand(command="tasks", description="Задачи сегодня"),
+        BotCommand(command="rating", description="Таблица лидеров"),
+        BotCommand(command="me", description="Мои баллы"),
+        BotCommand(command="history", description="История операций"),
+        BotCommand(command="myid", description="Мой Telegram ID"),
+        BotCommand(command="selftest", description="Самодиагностика"),
         BotCommand(command="ai_test", description="Проверка OpenAI"),
-        BotCommand(command="family_list", description="Админ: показать family IDs"),
+        BotCommand(command="family_list", description="Админ: список family IDs"),
         BotCommand(command="family_add", description="Админ: добавить family ID"),
         BotCommand(command="family_remove", description="Админ: удалить family ID"),
-        BotCommand(command="myid", description="Показать мой Telegram ID"),
-        BotCommand(command="selftest", description="Самотест бота"),
+        BotCommand(command="regen_today", description="Админ: задачи на сегодня"),
+        BotCommand(command="debug_jobs", description="Админ: планировщик"),
     ]
     try:
         await bot.set_my_commands(commands)
@@ -90,10 +94,13 @@ async def run_bot() -> None:
     dp.include_router(admin.router)
     dp.include_router(diagnostics.router)
 
-    scheduler = BotScheduler(bot)
-    set_lifecycle_controller(scheduler)
-    scheduler.start()
-    await scheduler.generate_tasks_for_day(date.today())
+    family_service.ensure_loaded(log=True)
+
+    shared_scheduler.attach_bot(bot)
+    set_lifecycle_controller(shared_scheduler)
+    shared_scheduler.start()
+    dp["scheduler"] = shared_scheduler
+    await shared_scheduler.generate_tasks_for_day(date.today())
 
     await set_commands(bot)
     try:
@@ -110,7 +117,7 @@ async def run_bot() -> None:
             else:
                 break
     finally:
-        scheduler.shutdown()
+        shared_scheduler.shutdown()
         set_lifecycle_controller(None)
 
 

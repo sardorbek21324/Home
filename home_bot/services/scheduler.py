@@ -98,12 +98,17 @@ COMMON_JOB_OPTIONS = {
 class BotScheduler:
     """High level orchestrator for timed events."""
 
-    def __init__(self, bot, scheduler: AsyncIOScheduler | None = None) -> None:
+    def __init__(self, bot=None, scheduler: AsyncIOScheduler | None = None) -> None:
         self.bot = bot
         self.scheduler = scheduler or get_scheduler()
         self.quiet_hours = parse_quiet_hours(settings.QUIET_HOURS)
 
+    def attach_bot(self, bot) -> None:
+        self.bot = bot
+
     def start(self) -> None:
+        if self.bot is None:  # pragma: no cover - configuration guard
+            raise RuntimeError("Bot instance must be attached before starting the scheduler")
         start_scheduler()
         from .lifecycle import schedule_daily_jobs
 
@@ -487,3 +492,6 @@ def load_seed_templates() -> Iterable[dict[str, object]]:
         return []
     with data_path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+shared_scheduler = BotScheduler()

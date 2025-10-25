@@ -41,27 +41,9 @@ def _get_scheduler() -> "BotScheduler | None":
     return get_lifecycle_controller()
 
 
-def _format_task(instance: TaskInstance) -> str:
-    template = instance.template
-    status_map = {
-        TaskStatus.open: "открыта",
-        TaskStatus.reserved: "в работе",
-        TaskStatus.report_submitted: "на проверке",
-        TaskStatus.approved: "завершена",
-        TaskStatus.rejected: "отклонена",
-        TaskStatus.expired: "истекла",
-        TaskStatus.missed: "просрочена",
-    }
-    status = status_map.get(instance.status, instance.status.value)
-    return (
-        f"{template.title} (+{template.base_points}) — {status}\n"
-        f"Слот: {instance.slot}, переносов: {instance.deferrals_used}"
-    )
+def build_tasks_overview() -> str:
+    """Return human friendly summary of open/reserved tasks."""
 
-
-@router.message(Command("tasks"))
-async def tasks_list(message: Message) -> None:
-    lines = []
     with session_scope() as session:
         instances = (
             session.query(TaskInstance)
@@ -69,14 +51,26 @@ async def tasks_list(message: Message) -> None:
             .order_by(TaskInstance.created_at.asc())
             .all()
         )
-        for inst in instances:
-            lines.append(_format_task(inst))
 
-    if not lines:
-        await message.answer("Нет открытых задач. Загляни позже!")
-        return
+    if not instances:
+        return "🎉 Все задания разобраны. Можно сделать перерыв!"
 
-    await message.answer("Доступные задания:\n" + "\n\n".join(lines))
+    lines = ["📋 Доступные задачи сегодня:"]
+    for inst in instances:
+        status = "🟢 свободна" if inst.status == TaskStatus.open else "🛠 в работе"
+        defer = inst.deferrals_used or 0
+        bar = "▓" * max(1, 5 - defer) + "░" * defer
+        lines.append(
+            f"• <b>{inst.template.title}</b> (+{inst.template.base_points})\n"
+            f"  {status} | попыток: {inst.attempts} | прогресс: {bar}"
+        )
+    lines.append("\nЖми на кнопку под задачей в чате, чтобы взять её в работу.")
+    return "\n".join(lines)
+
+
+@router.message(Command("tasks"))
+async def tasks_list(message: Message) -> None:
+    await message.answer(build_tasks_overview())
 
 
 @router.callback_query(F.data.regexp(r"^(claim|postpone):\\d+(?::\\d+)?$"))

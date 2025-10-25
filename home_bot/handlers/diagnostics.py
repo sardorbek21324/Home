@@ -54,3 +54,17 @@ async def selftest(message: Message) -> None:
     ).strip()
 
     await message.answer(text)
+
+
+@router.message(Command("debug_jobs"))
+async def debug_jobs(message: Message) -> None:
+    scheduler = get_scheduler()
+    jobs = scheduler.get_jobs()
+    if not jobs:
+        await message.answer("Планировщик активен, но задач нет.")
+        return
+    lines = ["🛠 Активные задания планировщика:"]
+    for job in jobs:
+        next_run = job.next_run_time.isoformat() if job.next_run_time else "—"
+        lines.append(f"• <code>{job.id}</code> → {next_run}")
+    await message.answer("\n".join(lines))

@@ -14,6 +14,7 @@ from . import Base, SessionLocal, engine
 from .models import (
     Dispute,
     DisputeState,
+    FamilyMember,
     Report,
     ScoreEvent,
     TaskFrequency,
@@ -78,6 +79,27 @@ def family_users(session: Session) -> Sequence[User]:
     return session.scalars(
         select(User).where(User.tg_id.in_(family_ids)).order_by(User.id)
     ).all()
+
+
+def list_family_member_ids(session: Session) -> list[int]:
+    return session.scalars(select(FamilyMember.tg_id).order_by(FamilyMember.tg_id)).all()
+
+
+def add_family_member_entry(session: Session, tg_id: int) -> bool:
+    if session.get(FamilyMember, tg_id):
+        return False
+    session.add(FamilyMember(tg_id=tg_id))
+    session.flush()
+    return True
+
+
+def remove_family_member_entry(session: Session, tg_id: int) -> bool:
+    member = session.get(FamilyMember, tg_id)
+    if not member:
+        return False
+    session.delete(member)
+    session.flush()
+    return True
 
 
 def get_user_by_tg(session: Session, tg_id: int) -> User | None:

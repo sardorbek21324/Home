@@ -33,6 +33,29 @@ def _format_history(rows: list[ScoreEvent]) -> str:
     return "\n".join(lines)
 
 
+def build_balance_text(tg_id: int) -> str:
+    with session_scope() as session:
+        user = _get_user(session, tg_id)
+        if not user:
+            return "Сначала нажми /start, чтобы зарегистрироваться."
+        return _format_balance(user)
+
+
+def build_history_text(tg_id: int) -> str:
+    with session_scope() as session:
+        user = _get_user(session, tg_id)
+        if not user:
+            return "Сначала нажми /start, чтобы зарегистрироваться."
+        rows = (
+            session.query(ScoreEvent)
+            .filter(ScoreEvent.user_id == user.id)
+            .order_by(ScoreEvent.created_at.desc())
+            .limit(20)
+            .all()
+        )
+        return _format_history(rows)
+
+
 @router.message(Command("rating"))
 async def show_rating(message: Message) -> None:
     with session_scope() as session:
@@ -51,30 +74,11 @@ async def show_rating(message: Message) -> None:
 async def show_balance(message: Message) -> None:
     if message.from_user is None:
         return
-    with session_scope() as session:
-        user = _get_user(session, message.from_user.id)
-        if not user:
-            await message.answer("Сначала /start")
-            return
-        text = _format_balance(user)
-    await message.answer(text)
+    await message.answer(build_balance_text(message.from_user.id))
 
 
 @router.message(Command("history"))
 async def history(message: Message) -> None:
     if message.from_user is None:
         return
-    with session_scope() as session:
-        user = _get_user(session, message.from_user.id)
-        if not user:
-            await message.answer("Сначала /start")
-            return
-        rows = (
-            session.query(ScoreEvent)
-            .filter(ScoreEvent.user_id == user.id)
-            .order_by(ScoreEvent.created_at.desc())
-            .limit(20)
-            .all()
-        )
-        text = _format_history(rows)
-    await message.answer(text)
+    await message.answer(build_history_text(message.from_user.id))
