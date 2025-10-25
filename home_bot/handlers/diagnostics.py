@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import textwrap
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -24,26 +26,30 @@ async def selftest(message: Message) -> None:
     running = scheduler.running
     jobs = scheduler.get_jobs() if running else []
     jobs_info = "\n".join(
-        f"- {job.id}: next={job.next_run_time}"
+        f"- {job.id}: next={job.next_run_time.isoformat() if job.next_run_time else '—'}"
         for job in jobs
     ) or "—"
 
-    ai_status = await quick_ai_ping()
-
     try:
-        await message.answer("🔎 Self-test: echo ok", disable_notification=True)
+        await message.bot.get_me()
         tg_status = "ok"
     except Exception as exc:  # pragma: no cover - network
-        tg_status = f"ошибка: {exc.__class__.__name__}"
+        tg_status = f"ошибка — {exc.__class__.__name__}"
 
-    text = (
-        "✅ SELFTEST\n"
-        f"Admins: {admins}\n"
-        f"Family: {family}\n"
-        f"Scheduler running: {running}\n"
-        f"Jobs:\n{jobs_info}\n"
-        f"Telegram: {tg_status}\n"
-        f"{ai_status}\n"
-        "Если что-то '—' или 'ошибка' — проверь настройки."
-    )
+    ai_status = await quick_ai_ping()
+
+    text = textwrap.dedent(
+        f"""
+        ✅ SELFTEST
+        Admins: {admins}
+        Family: {family}
+        Scheduler running: {running}
+        Jobs:
+        {jobs_info}
+        Telegram: {tg_status}
+        {ai_status}
+        Если что-то '—' или 'ошибка' — проверь настройки.
+        """
+    ).strip()
+
     await message.answer(text)

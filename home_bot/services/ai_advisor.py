@@ -20,7 +20,7 @@ _client: OpenAI | None = None
 def ai_enabled() -> bool:
     """Return True if OpenAI integration is configured."""
 
-    return bool(settings.OPENAI_API_KEY and OpenAI is not None)
+    return bool(settings.OPENAI_KEY and OpenAI is not None)
 
 
 def _cli() -> OpenAI | None:
@@ -29,7 +29,7 @@ def _cli() -> OpenAI | None:
         return None
     if _client is None:
         try:
-            _client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            _client = OpenAI(api_key=settings.OPENAI_KEY)
         except Exception as exc:  # pragma: no cover - network
             log.info("OpenAI client init failed: %s", exc)
             _client = None
@@ -97,14 +97,15 @@ async def draft_announce(template_title: str, points: int, bonus_hint: str) -> s
 async def quick_ai_ping() -> str:
     """Perform a lightweight API call to verify OpenAI availability."""
 
-    if not settings.OPENAI_API_KEY or OpenAI is None:
+    if not settings.OPENAI_KEY or OpenAI is None:
         return "AI: ключ не задан — пропускаю."
     try:
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        client = OpenAI(api_key=settings.OPENAI_KEY)
         await asyncio.to_thread(
-            client.responses.create,
+            client.chat.completions.create,
             model="gpt-4o-mini",
-            input="ping",
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
         )
         return "AI: ok"
     except Exception as exc:  # pragma: no cover - network

@@ -88,6 +88,14 @@ def get_lifecycle_controller() -> "BotScheduler | None":
 log = logging.getLogger(__name__)
 
 
+COMMON_JOB_OPTIONS = {
+    "coalesce": True,
+    "misfire_grace_time": 120,
+    "max_instances": 1,
+    "replace_existing": True,
+}
+
+
 class BotScheduler:
     """High level orchestrator for timed events."""
 
@@ -130,7 +138,7 @@ class BotScheduler:
             trigger=trigger,
             args=[instance_id],
             id=self._job_id("vote", instance_id),
-            replace_existing=True,
+            **COMMON_JOB_OPTIONS,
         )
         log.info("Vote deadline scheduled for instance %s at %s", instance_id, run_date.isoformat())
 
@@ -179,7 +187,7 @@ class BotScheduler:
                 args=[instance_id, penalize],
                 kwargs={"note": note},
                 id=self._job_id("announce", instance_id),
-                replace_existing=True,
+                **COMMON_JOB_OPTIONS,
             )
             log.info(
                 "Delayed announcement for instance %s to %s because of quiet hours",
@@ -191,6 +199,9 @@ class BotScheduler:
         await self._deliver_announcement(instance_id, penalize=penalize, note=note)
 
     async def _deliver_announcement(self, instance_id: int, *, penalize: bool, note: str | None) -> None:
+        if not settings.FAMILY_IDS:
+            log.info("No family members to notify.")
+            return
         recipients: list[tuple[int, int]] = []
         allow_first = True
         allow_second = True
@@ -266,7 +277,7 @@ class BotScheduler:
             trigger=trigger,
             args=[instance_id],
             id=self._job_id("claim_timeout", instance_id),
-            replace_existing=True,
+            **COMMON_JOB_OPTIONS,
         )
         log.debug("Claim deadline scheduled for instance %s at %s", instance_id, run_date.isoformat())
 
@@ -305,7 +316,7 @@ class BotScheduler:
             trigger=trigger,
             args=[instance_id, note],
             id=self._job_id("reannounce", instance_id),
-            replace_existing=True,
+            **COMMON_JOB_OPTIONS,
         )
         log.info("Reannounce for instance %s scheduled at %s", instance_id, run_date.isoformat())
 
