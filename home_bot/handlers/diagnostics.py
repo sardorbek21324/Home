@@ -9,8 +9,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from ..config import settings
-from .admin_family import get_family_ids
-from ..services.ai_advisor import quick_ai_ping
+from ..services.ai_advisor import AIAdvisor
 from ..services.scheduler import get_scheduler
 
 router = Router()
@@ -21,8 +20,7 @@ async def selftest(message: Message) -> None:
     """Run lightweight health checks and report the status."""
 
     admins = ", ".join(map(str, settings.ADMIN_IDS)) or "—"
-    family_ids = get_family_ids()
-    family = ", ".join(map(str, family_ids)) or "—"
+    family = ", ".join(map(str, settings.FAMILY_IDS)) or "—"
 
     scheduler = get_scheduler()
     running = scheduler.running
@@ -38,7 +36,8 @@ async def selftest(message: Message) -> None:
     except Exception as exc:  # pragma: no cover - network
         tg_status = f"ошибка — {exc.__class__.__name__}"
 
-    ai_status = await quick_ai_ping()
+    advisor = AIAdvisor()
+    ai_status = await advisor.healthcheck()
 
     text = textwrap.dedent(
         f"""
@@ -49,7 +48,7 @@ async def selftest(message: Message) -> None:
         Jobs:
         {jobs_info}
         Telegram: {tg_status}
-        {ai_status}
+        AI: {ai_status}
         Если что-то '—' или 'ошибка' — проверь настройки.
         """
     ).strip()
