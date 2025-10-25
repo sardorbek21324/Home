@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from typing import Sequence, TYPE_CHECKING
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from ..db.models import TaskInstance, TaskStatus, User
 from ..db.repo import (
@@ -19,12 +20,63 @@ from ..db.repo import (
     submit_report,
 )
 from ..domain.constants import CANCEL_GRACE_MINUTES, CANCEL_LATE_PENALTY, CLAIM_DEFER_MINUTES
-from ..main import scheduler
 from ..services.notifications import report_keyboard, verification_keyboard
+
+if TYPE_CHECKING:
+    from ..services.scheduler import BotScheduler
 
 
 router = Router()
 log = logging.getLogger(__name__)
+
+
+def _get_scheduler(bot: Bot) -> "BotScheduler | None":
+    try:
+        return bot["lifecycle"]
+    except KeyError:
+        return None
+
+
+def task_keyboard(instance_id: int, can_defer_1: bool, can_defer_2: bool) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="🏁 Беру", callback_data=f"claim:{instance_id}")]
+    ]
+    if can_defer_1:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="⏳ Через 30 мин (−20%)",
+                    callback_data=f"defer1:{instance_id}",
+                )
+            ]
+        )
+    if can_defer_2:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="⏳ Через 60 мин (−40%)",
+                    callback_data=f"defer2:{instance_id}",
+                )
+            ]
+        )
+    buttons.append(
+        [InlineKeyboardButton(text="🚫 Отменить бронь", callback_data=f"cancel:{instance_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+async def announce_task(bot: Bot, users: Sequence[int], ti: TaskInstance, text: str) -> None:
+    can_defer_1 = True
+    can_defer_2 = True
+    if getattr(ti, "deferrals_used", 0):
+        can_defer_1 = ti.deferrals_used < 1
+        can_defer_2 = ti.deferrals_used < 2
+    keyboard = task_keyboard(ti.id, can_defer_1, can_defer_2)
+    for uid in users:
+        try:
+            await bot.send_message(uid, text, reply_markup=keyboard)
+        except Exception as exc:
+            log.warning("Failed to deliver task %s to %s: %s", ti.id, uid, exc)
 
 
 def _format_task(instance: TaskInstance) -> str:
@@ -65,15 +117,14 @@ async def tasks_list(message: Message) -> None:
     await message.answer("Доступные задания:\n" + "\n\n".join(lines))
 
 
-@router.callback_query(F.data.startswith("task:claim:"))
+@router.callback_query(F.data.regexp(r"^(claim|defer1|defer2):\\d+$"))
 async def claim_task(cb: CallbackQuery) -> None:
     if cb.from_user is None:
         return
-    parts = cb.data.split(":")
-    if len(parts) < 4:
+    action, _, inst_id_str = cb.data.partition(":")
+    if not inst_id_str:
         await cb.answer()
         return
-    _, _, inst_id_str, mode = parts
     instance_id = int(inst_id_str)
 
     with session_scope() as session:
@@ -82,16 +133,25 @@ async def claim_task(cb: CallbackQuery) -> None:
             await cb.answer("Задача уже занята.", show_alert=True)
             return
         user = ensure_user(session, cb.from_user.id, cb.from_user.full_name, cb.from_user.username)
-        can_defer = mode == "defer"
+        can_defer = action != "claim"
         if can_defer and instance.deferrals_used >= 2:
             await cb.answer("Отложить можно не больше двух раз.", show_alert=True)
             return
+        explicit_deferrals = None
+        defer_minutes = 0
+        if action == "defer1":
+            defer_minutes = CLAIM_DEFER_MINUTES
+            explicit_deferrals = min(max(instance.deferrals_used, 0) + 1, 2)
+        elif action == "defer2":
+            defer_minutes = CLAIM_DEFER_MINUTES * 2
+            explicit_deferrals = 2
         deadline = reserve_instance(
             session,
             instance,
             user,
             defer=can_defer,
-            defer_minutes=CLAIM_DEFER_MINUTES,
+            defer_minutes=defer_minutes,
+            explicit_deferrals=explicit_deferrals,
         )
         template_title = instance.template.title
         deferrals = instance.deferrals_used
@@ -101,8 +161,9 @@ async def claim_task(cb: CallbackQuery) -> None:
         reply_markup=report_keyboard(instance_id),
     )
     await cb.answer("Удачи! Не забудь отправить отчёт.")
-    if scheduler:
-        scheduler.cancel_open_jobs(instance_id)
+    lifecycle = _get_scheduler(cb.bot)
+    if lifecycle:
+        lifecycle.cancel_open_jobs(instance_id)
     log.info(
         "Task %s reserved by %s (deferrals=%s, deadline=%s)",
         instance_id,
@@ -112,11 +173,12 @@ async def claim_task(cb: CallbackQuery) -> None:
     )
 
 
-@router.callback_query(F.data.startswith("task:cancel:"))
+@router.callback_query(F.data.startswith("cancel:"))
 async def cancel_task(cb: CallbackQuery) -> None:
     if cb.from_user is None:
         return
-    instance_id = int(cb.data.split(":")[2])
+    _, _, inst_id_str = cb.data.partition(":")
+    instance_id = int(inst_id_str)
 
     with session_scope() as session:
         instance = session.get(TaskInstance, instance_id)
@@ -149,17 +211,19 @@ async def cancel_task(cb: CallbackQuery) -> None:
 
     await cb.message.edit_text("Бронь снята. Задача снова доступна всем.")
     await cb.answer("Отменено")
-    if scheduler:
-        scheduler.cancel_open_jobs(instance_id)
-        await scheduler.announce_instance(instance_id, penalize=False)
+    lifecycle = _get_scheduler(cb.bot)
+    if lifecycle:
+        lifecycle.cancel_open_jobs(instance_id)
+        await lifecycle.announce_instance(instance_id, penalize=False)
     log.info("Reservation for instance %s cancelled by %s", instance_id, cb.from_user.full_name)
 
 
-@router.callback_query(F.data.startswith("task:report:"))
+@router.callback_query(F.data.startswith("report:"))
 async def request_report(cb: CallbackQuery) -> None:
     if cb.from_user is None:
         return
-    instance_id = int(cb.data.split(":")[2])
+    _, _, inst_id_str = cb.data.partition(":")
+    instance_id = int(inst_id_str)
     with session_scope() as session:
         instance = session.get(TaskInstance, instance_id)
         if not instance or instance.status != TaskStatus.reserved:
@@ -197,7 +261,12 @@ async def handle_photo(message: Message) -> None:
         file_id = message.photo[-1].file_id
         submit_report(session, instance, user, file_id)
         template_title = instance.template.title
-        other_ids = [(other.tg_id, other.name) for other in list_users(session) if other.id != user.id]
+        other_candidates = [
+            other
+            for other in list_users(session)
+            if other.id != user.id and other.tg_id is not None
+        ]
+        other_ids = [(other.tg_id, other.name) for other in other_candidates[:2]]
         instance_id = instance.id
 
     await message.answer("Фото получено. Ожидаем голоса семьи!")
@@ -216,8 +285,9 @@ async def handle_photo(message: Message) -> None:
         except Exception:
             continue
 
-    if scheduler:
-        scheduler.cancel_open_jobs(instance_id)
+    lifecycle = _get_scheduler(message.bot)
+    if lifecycle:
+        lifecycle.cancel_open_jobs(instance_id)
     log.info(
         "Report submitted for instance %s by %s", instance_id, message.from_user.full_name
     )

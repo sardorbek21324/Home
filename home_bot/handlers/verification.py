@@ -3,18 +3,28 @@ from __future__ import annotations
 """Handlers responsible for peer verification of reports."""
 
 import logging
+from typing import TYPE_CHECKING
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 
 from ..db.models import TaskInstance, TaskStatus, User, Vote, VoteValue
 from ..db.repo import add_score_event, open_dispute, register_vote, session_scope, votes_summary
-from ..main import scheduler
 from ..services.scoring import reward_for_completion
+
+if TYPE_CHECKING:
+    from ..services.scheduler import BotScheduler
 
 
 router = Router()
 log = logging.getLogger(__name__)
+
+
+def _get_scheduler(bot: Bot) -> "BotScheduler | None":
+    try:
+        return bot["lifecycle"]
+    except KeyError:
+        return None
 
 
 @router.callback_query(F.data.startswith("vote:"))
@@ -59,11 +69,12 @@ async def handle_vote(cb: CallbackQuery) -> None:
         performer_tg_id = performer.tg_id if performer else None
         total_votes = yes + no
 
-        if scheduler:
+        lifecycle = _get_scheduler(cb.bot)
+        if lifecycle:
             if total_votes == 1:
-                scheduler.schedule_vote_deadline(instance.id)
+                lifecycle.schedule_vote_deadline(instance.id)
             elif total_votes >= 2:
-                scheduler.cancel_vote_deadline(instance.id)
+                lifecycle.cancel_vote_deadline(instance.id)
 
         if yes >= 2:
             decision = "approved"

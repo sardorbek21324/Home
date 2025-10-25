@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -29,11 +30,20 @@ from ..db.repo import (
     session_scope,
 )
 from ..services.scoring import reward_for_completion
-from ..main import scheduler
+
+if TYPE_CHECKING:
+    from ..services.scheduler import BotScheduler
 
 
 router = Router()
 log = logging.getLogger(__name__)
+
+
+def _get_scheduler(bot: Bot) -> "BotScheduler | None":
+    try:
+        return bot["lifecycle"]
+    except KeyError:
+        return None
 
 
 def _require_admin(message: Message) -> bool:
@@ -58,11 +68,12 @@ async def manual_announce(message: Message) -> None:
             return
         instance_id = instance.id
 
-    if scheduler is None:
+    lifecycle = _get_scheduler(message.bot)
+    if lifecycle is None:
         await message.answer("Планировщик не активен.")
         return
 
-    await scheduler.announce_instance(instance_id, penalize=False)
+    await lifecycle.announce_instance(instance_id, penalize=False)
     await message.answer("Задача объявлена повторно.")
     log.info("Admin %s triggered manual announce for instance %s", message.from_user.id, instance_id)
 
