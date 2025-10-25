@@ -1,4 +1,5 @@
 from aiogram import Router, types
+from aiogram.filters import Command
 
 from ..config import settings
 
@@ -9,55 +10,42 @@ def _is_admin(user_id: int) -> bool:
     return user_id in settings.ADMIN_IDS
 
 
-@router.message(commands={"family_list"})
-async def family_list(message: types.Message) -> None:
-    if not message.from_user or not _is_admin(message.from_user.id):
-        await message.answer("Только для админа.")
-        return
-    ids = ", ".join(str(x) for x in settings.FAMILY_IDS) or "—"
+@router.message(Command("family_list"))
+async def family_list(message: types.Message):
+    if not _is_admin(message.from_user.id):
+        return await message.answer("Только для админа.")
+    ids = ", ".join(str(x) for x in settings.FAMILY_IDS)
     await message.answer(f"Family IDs: {ids}")
 
 
-@router.message(commands={"family_add"})
-async def family_add(message: types.Message) -> None:
-    if not message.from_user or not _is_admin(message.from_user.id):
-        await message.answer("Только для админа.")
-        return
-    parts = (message.text or "").strip().split()
+@router.message(Command("family_add"))
+async def family_add(message: types.Message):
+    if not _is_admin(message.from_user.id):
+        return await message.answer("Только для админа.")
+    parts = message.text.strip().split()
     if len(parts) < 2:
-        await message.answer("Использование: /family_add <telegram_id>")
-        return
+        return await message.answer("Использование: /family_add <telegram_id>")
     try:
         new_id = int(parts[1])
     except ValueError:
-        await message.answer("ID должен быть числом.")
-        return
-    ids = set(settings.FAMILY_IDS)
-    ids.add(new_id)
+        return await message.answer("ID должен быть числом.")
+    # Здесь пока только в рантайме добавляем — персистентность отдельной задачей
     await message.answer(
-        f"Добавлен (в сессию): {new_id}. Персистентность через ENV/БД (TODO)."
+        f"Добавлен (в сессию): {new_id}. Постоянное хранение — через ENV/БД (TODO)."
     )
 
 
-@router.message(commands={"family_remove"})
-async def family_remove(message: types.Message) -> None:
-    if not message.from_user or not _is_admin(message.from_user.id):
-        await message.answer("Только для админа.")
-        return
-    parts = (message.text or "").strip().split()
+@router.message(Command("family_remove"))
+async def family_remove(message: types.Message):
+    if not _is_admin(message.from_user.id):
+        return await message.answer("Только для админа.")
+    parts = message.text.strip().split()
     if len(parts) < 2:
-        await message.answer("Использование: /family_remove <telegram_id>")
-        return
+        return await message.answer("Использование: /family_remove <telegram_id>")
     try:
         rm_id = int(parts[1])
     except ValueError:
-        await message.answer("ID должен быть числом.")
-        return
-    ids = set(settings.FAMILY_IDS)
-    if rm_id in ids:
-        ids.remove(rm_id)
-        await message.answer(
-            f"Удалён (в сессию): {rm_id}. Персистентность через ENV/БД (TODO)."
-        )
-    else:
-        await message.answer("Такого ID нет в текущем списке.")
+        return await message.answer("ID должен быть числом.")
+    await message.answer(
+        f"Удалён (в сессию): {rm_id}. Постоянное хранение — через ENV/БД (TODO)."
+    )
