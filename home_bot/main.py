@@ -5,10 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from aiohttp import ClientTimeout
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import BotCommand
@@ -59,10 +57,8 @@ async def run_bot() -> None:
     with session_scope() as session:
         seed_templates(session, load_seed_templates())
 
-    session = AiohttpSession(timeout=ClientTimeout(total=20))
     bot = Bot(
         token=settings.BOT_TOKEN,
-        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
@@ -86,7 +82,7 @@ async def run_bot() -> None:
     try:
         while True:
             try:
-                await dp.start_polling(bot)
+                await dp.start_polling(bot, polling_timeout=20)
             except TelegramRetryAfter as exc:
                 delay = exc.retry_after + 1
                 logging.getLogger(__name__).warning("Telegram rate limit. Sleep %s s", delay)
