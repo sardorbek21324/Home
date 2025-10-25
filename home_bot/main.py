@@ -6,6 +6,7 @@ from .config import settings
 from .utils.logging import setup_logging
 from .db.repo import init_db
 from .handlers import common, tasks, score, admin, profile
+from .handlers.start import router as start_router
 from .services.scheduler import BotScheduler
 
 bot = None
@@ -20,6 +21,7 @@ async def main():
     global bot, dp, scheduler
     bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML)
     dp = Dispatcher()
+    dp.include_router(start_router)
     dp.include_router(common.router)
     dp.include_router(tasks.router)
     dp.include_router(score.router)
