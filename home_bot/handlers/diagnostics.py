@@ -9,6 +9,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from ..config import settings
+from .admin_family import get_family_ids
 from ..services.ai_advisor import quick_ai_ping
 from ..services.scheduler import get_scheduler
 
@@ -20,7 +21,8 @@ async def selftest(message: Message) -> None:
     """Run lightweight health checks and report the status."""
 
     admins = ", ".join(map(str, settings.ADMIN_IDS)) or "—"
-    family = ", ".join(map(str, settings.FAMILY_IDS)) or "—"
+    family_ids = get_family_ids()
+    family = ", ".join(map(str, family_ids)) or "—"
 
     scheduler = get_scheduler()
     running = scheduler.running
