@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from ..config import settings
+from . import score, tasks
 
 
 router = Router()
@@ -28,17 +29,17 @@ async def show_menu(message: Message) -> None:
 
 @router.message(lambda m: m.text == "📊 Баланс")
 async def balance_from_menu(message: Message) -> None:
-    await message.bot.send_message(message.chat.id, "Используйте /me для просмотра баланса.")
+    await score.show_balance(message)
 
 
 @router.message(lambda m: m.text == "📅 История")
 async def history_from_menu(message: Message) -> None:
-    await message.bot.send_message(message.chat.id, "Используйте /history для истории событий.")
+    await score.history(message)
 
 
 @router.message(lambda m: m.text == "🧹 Задачи")
 async def tasks_from_menu(message: Message) -> None:
-    await message.bot.send_message(message.chat.id, "Доступные задачи можно запросить командой /tasks.")
+    await tasks.tasks_list(message)
 
 
 @router.message(lambda m: m.text == "🛠 Админ")

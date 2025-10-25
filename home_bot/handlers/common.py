@@ -14,7 +14,7 @@ async def help_command(message: Message) -> None:
         "Команды:\n"
         "/menu — открыть меню\n"
         "/rating — таблица лидеров\n"
-        "/me — мой баланс\n"
+        "/balance — мой баланс\n"
         "/history — история операций\n"
-        "Админы: /announce, /add_task, /end_month"
+        "Админы: /announce, /add_task, /end_month, /disputes"
     )

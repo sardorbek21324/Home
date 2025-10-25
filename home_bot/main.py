@@ -7,6 +7,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import BotCommand
 
 from datetime import date
@@ -29,6 +30,7 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="start", description="Запустить"),
         BotCommand(command="menu", description="Меню"),
         BotCommand(command="rating", description="Таблица лидеров"),
+        BotCommand(command="balance", description="Баланс"),
         BotCommand(command="history", description="История"),
         BotCommand(command="help", description="Помощь"),
     ]
@@ -64,8 +66,12 @@ async def run_bot() -> None:
     while True:
         try:
             await dp.start_polling(bot)
-        except Exception as exc:
-            logging.getLogger(__name__).warning("Polling error: %s", exc, exc_info=True)
+        except TelegramRetryAfter as exc:
+            delay = exc.retry_after + 1
+            logging.getLogger(__name__).warning("Telegram rate limit. Sleep %s s", delay)
+            await asyncio.sleep(delay)
+        except TelegramNetworkError as exc:
+            logging.getLogger(__name__).warning("Network issue: %s", exc, exc_info=True)
             await asyncio.sleep(5)
         else:
             break
