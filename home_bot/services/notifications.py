@@ -1,22 +1,31 @@
+"""Helpers for constructing inline keyboards and messages."""
+
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-def task_take_keyboard(instance_id: int):
-    kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Беру сейчас", callback_data=f"take_now:{instance_id}")
-    kb.button(text="⏰ Беру через 30 мин", callback_data=f"take_later:{instance_id}")
-    kb.adjust(1)
-    return kb.as_markup()
 
-def task_proof_keyboard(instance_id: int):
-    kb = InlineKeyboardBuilder()
-    kb.button(text="📸 Отправить фото", callback_data=f"send_photo:{instance_id}")
-    kb.button(text="❌ Отменить (5 мин)", callback_data=f"cancel_task:{instance_id}")
-    kb.adjust(1)
-    return kb.as_markup()
+def task_announce_keyboard(instance_id: int, *, can_defer: bool, can_cancel: bool = False) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Беру", callback_data=f"task:claim:{instance_id}:now")
+    if can_defer:
+        builder.button(text="⏳ Беру через 30 мин", callback_data=f"task:claim:{instance_id}:defer")
+    if can_cancel:
+        builder.button(text="↩️ Отмена", callback_data=f"task:cancel:{instance_id}")
+    builder.adjust(1)
+    return builder.as_markup()
 
-def verification_keyboard(instance_id: int):
-    kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Да", callback_data=f"verify:{instance_id}:yes")
-    kb.button(text="❌ Нет", callback_data=f"verify:{instance_id}:no")
-    kb.adjust(2)
-    return kb.as_markup()
+
+def report_keyboard(instance_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📸 Отправить отчёт", callback_data=f"task:report:{instance_id}")
+    builder.button(text="↩️ Отменить", callback_data=f"task:cancel:{instance_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def verification_keyboard(instance_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да", callback_data=f"vote:{instance_id}:yes")
+    builder.button(text="❌ Нет", callback_data=f"vote:{instance_id}:no")
+    builder.adjust(2)
+    return builder.as_markup()

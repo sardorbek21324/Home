@@ -1,33 +1,69 @@
-from typing import List
-from pydantic_settings import BaseSettings
-from pydantic import Field
+"""Project settings helpers."""
 
-# Prefer static local settings so user edits only one file.
-_defaults = {}
-try:
-    from .local_settings import BOT_TOKEN, OPENAI_API_KEY, DATABASE_URL, ADMIN_IDS, TZ, QUIET_HOURS
-    _defaults = {
-        "BOT_TOKEN": BOT_TOKEN,
-        "OPENAI_API_KEY": OPENAI_API_KEY,
-        "DATABASE_URL": DATABASE_URL,
-        "ADMIN_IDS": ADMIN_IDS,
-        "TZ": TZ,
-        "QUIET_HOURS": QUIET_HOURS,
-    }
-except Exception:
-    # If local_settings.py missing, fall back to env variables (still supported).
-    _defaults = {}
+from __future__ import annotations
+
+import json
+from typing import Any, Iterable
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _coerce_admin_ids(value: Any) -> list[int]:
+    """Convert supported representations of admin ids to a list of ints."""
+
+    if value is None or value == "":
+        return []
+
+    if isinstance(value, int):
+        return [value]
+
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        result: list[int] = []
+        for item in value:
+            if item is None or item == "":
+                continue
+            result.append(int(item))
+        return result
+
+    text = str(value).strip()
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"ADMIN_IDS JSON parse error: {exc}") from exc
+        return _coerce_admin_ids(parsed)
+
+    # allow comma separated values
+    if "," in text:
+        return [int(chunk.strip()) for chunk in text.split(",") if chunk.strip()]
+
+    return [int(text)]
+
 
 class Settings(BaseSettings):
-    BOT_TOKEN: str = _defaults.get("BOT_TOKEN", "")
-    OPENAI_API_KEY: str | None = _defaults.get("OPENAI_API_KEY", None)
-    DATABASE_URL: str = _defaults.get("DATABASE_URL", "sqlite:///data.db")
-    ADMIN_IDS: List[int] = Field(default_factory=lambda: _defaults.get("ADMIN_IDS", []))
-    TZ: str = _defaults.get("TZ", "Europe/Warsaw")
-    QUIET_HOURS: str = _defaults.get("QUIET_HOURS", "23:00-08:00")
+    """Runtime configuration loaded from the environment."""
 
-settings = Settings()
+    BOT_TOKEN: str
+    OPENAI_API_KEY: str | None = None
+    DATABASE_URL: str = "sqlite:///data.db"
+    ADMIN_IDS: list[int] = []
+    TZ: str = "Europe/Moscow"
+    QUIET_HOURS: str = "23:00-08:00"
 
-# Friendly guardrail: nudge user to paste token if left blank
-if not settings.BOT_TOKEN or settings.BOT_TOKEN == "PASTE_TELEGRAM_BOT_TOKEN_HERE":
-    raise RuntimeError("Please open home_bot/local_settings.py and paste your BOT_TOKEN.")
+    model_config = SettingsConfigDict(env_prefix="", env_file=None, case_sensitive=False)
+
+    @field_validator("ADMIN_IDS", mode="before")
+    @classmethod
+    def _validate_admin_ids(cls, value: Any) -> list[int]:
+        return _coerce_admin_ids(value)
+
+    @field_validator("BOT_TOKEN")
+    @classmethod
+    def _ensure_bot_token(cls, value: str) -> str:
+        if not value:
+            raise ValueError("BOT_TOKEN environment variable is required")
+        return value
+
+
+settings = Settings()  # type: ignore[arg-type]

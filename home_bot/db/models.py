@@ -1,100 +1,159 @@
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, Integer, DateTime, ForeignKey, Enum
+"""SQLAlchemy models for the bot domain."""
+
+from __future__ import annotations
+
 from datetime import datetime, date
-import enum
+from enum import Enum as PyEnum
+from typing import Optional
+
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from . import Base
 
-class Role(str, enum.Enum):
-    admin = "admin"
-    member = "member"
 
-class Status(str, enum.Enum):
-    available = "available"
-    busy_until = "busy_until"
-    day_off = "day_off"
-    vacation = "vacation"
+class TaskFrequency(str, PyEnum):
+    daily = "daily"
+    weekly = "weekly"
+    every_2days = "every_2days"
+    custom = "custom"
+
+
+class TaskKind(str, PyEnum):
+    house = "house"
+    mini = "mini"
+    outside = "outside"
+
+
+class TaskStatus(str, PyEnum):
+    open = "open"
+    reserved = "reserved"
+    report_submitted = "report_submitted"
+    approved = "approved"
+    rejected = "rejected"
+    expired = "expired"
+    missed = "missed"
+
+
+class VoteValue(str, PyEnum):
+    yes = "yes"
+    no = "no"
+
+
+class DisputeState(str, PyEnum):
+    open = "open"
+    resolved = "resolved"
+
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    telegram_id: Mapped[int] = mapped_column(unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(128))
-    nickname: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    role: Mapped[str] = mapped_column(Enum(Role), default=Role.member)
-    status: Mapped[str] = mapped_column(Enum(Status), default=Status.available)
-    busy_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    vacation_from: Mapped[date | None] = mapped_column(nullable=True)
-    vacation_to: Mapped[date | None] = mapped_column(nullable=True)
-    monthly_points: Mapped[int] = mapped_column(Integer, default=0)
-    penalty_multiplier: Mapped[int] = mapped_column(Integer, default=0)
-    missed_checks_streak: Mapped[int] = mapped_column(Integer, default=0)
 
-class TaskKind(str, enum.Enum):
-    main = "main"
-    mini = "mini"
-    external = "external"
-
-class Task(Base):
-    __tablename__ = "tasks"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tg_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
-    kind: Mapped[str] = mapped_column(Enum(TaskKind))
+    username: Mapped[Optional[str]] = mapped_column(String(64))
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+
+    reports: Mapped[list["Report"]] = relationship(back_populates="user")
+    events: Mapped[list["ScoreEvent"]] = relationship(back_populates="user")
+
+
+class TaskTemplate(Base):
+    __tablename__ = "task_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(255))
     base_points: Mapped[int] = mapped_column(Integer)
-    freq: Mapped[str] = mapped_column(String(64))
-    response_window_minutes: Mapped[int] = mapped_column(Integer)
-    execution_window_minutes: Mapped[int] = mapped_column(Integer)
-    min_points: Mapped[int] = mapped_column(Integer, default=1)
-    max_points: Mapped[int] = mapped_column(Integer, default=20)
+    frequency: Mapped[TaskFrequency] = mapped_column(Enum(TaskFrequency))
+    max_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sla_minutes: Mapped[int] = mapped_column(Integer)
+    claim_timeout_minutes: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[TaskKind] = mapped_column(Enum(TaskKind))
+    nobody_claimed_penalty: Mapped[int] = mapped_column(Integer, default=0)
+    deferral_penalty_pct: Mapped[int] = mapped_column(Integer, default=20)
 
-class InstanceState(str, enum.Enum):
-    announced = "announced"
-    taken_now = "taken_now"
-    taken_later = "taken_later"
-    awaiting_proof = "awaiting_proof"
-    awaiting_check = "awaiting_check"
-    disputed = "disputed"
-    done = "done"
-    failed = "failed"
-    expired = "expired"
+    instances: Mapped[list["TaskInstance"]] = relationship(back_populates="template")
+
 
 class TaskInstance(Base):
     __tablename__ = "task_instances"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"))
-    scheduled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    state: Mapped[str] = mapped_column(Enum(InstanceState), default=InstanceState.announced)
-    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    defer_count: Mapped[int] = mapped_column(Integer, default=0)
-    reward_points_final: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    retries_today: Mapped[int] = mapped_column(Integer, default=0)
-    last_announce_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    __table_args__ = (
+        UniqueConstraint("template_id", "day", "slot", name="uq_instance_template_day_slot"),
+    )
 
-class Verification(Base):
-    __tablename__ = "verifications"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"))
-    photo_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    video_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    first_vote_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    votes_yes: Mapped[int] = mapped_column(Integer, default=0)
-    votes_no: Mapped[int] = mapped_column(Integer, default=0)
-    voter1_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    voter1_vote: Mapped[str | None] = mapped_column(String(8), nullable=True)  # 'yes'/'no'
-    voter2_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    voter2_vote: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    awaiting_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-class History(Base):
-    __tablename__ = "history"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    task_instance_id: Mapped[int | None] = mapped_column(ForeignKey("task_instances.id"), nullable=True)
-    delta: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(String(64))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("task_templates.id"))
+    day: Mapped[date] = mapped_column(Date)
+    slot: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[TaskStatus] = mapped_column(Enum(TaskStatus), default=TaskStatus.open)
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    reserved_until: Mapped[datetime | None] = mapped_column(DateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    deferrals_used: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_announce_at: Mapped[datetime | None] = mapped_column(DateTime)
 
-class AIPatch(Base):
-    __tablename__ = "ai_patches"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    patch_json: Mapped[str] = mapped_column(String, nullable=False)
-    applied_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    template: Mapped[TaskTemplate] = relationship(back_populates="instances")
+    report: Mapped[Optional["Report"]] = relationship(back_populates="task_instance", uselist=False)
+    votes: Mapped[list["Vote"]] = relationship(back_populates="task_instance")
+    dispute: Mapped[Optional["Dispute"]] = relationship(back_populates="task_instance", uselist=False)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    photo_file_id: Mapped[str] = mapped_column(String(255))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    task_instance: Mapped[TaskInstance] = relationship(back_populates="report")
+    user: Mapped[User] = relationship(back_populates="reports")
+
+
+class Vote(Base):
+    __tablename__ = "votes"
+    __table_args__ = (UniqueConstraint("task_instance_id", "voter_id", name="uq_vote_unique"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"))
+    voter_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    value: Mapped[VoteValue] = mapped_column(Enum(VoteValue))
+    voted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    task_instance: Mapped[TaskInstance] = relationship(back_populates="votes")
+    voter: Mapped[User] = relationship()
+
+
+class ScoreEvent(Base):
+    __tablename__ = "score_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    delta: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(255))
+    task_instance_id: Mapped[int | None] = mapped_column(ForeignKey("task_instances.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    season: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="events")
+    task_instance: Mapped[Optional[TaskInstance]] = relationship()
+
+
+class Dispute(Base):
+    __tablename__ = "disputes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"))
+    opened_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    state: Mapped[DisputeState] = mapped_column(Enum(DisputeState), default=DisputeState.open)
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    note: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    task_instance: Mapped[TaskInstance] = relationship(back_populates="dispute")
+

@@ -1,0 +1,123 @@
+[
+  {
+    "code": "clean_house_daily",
+    "title": "Уборка дома",
+    "base_points": 25,
+    "frequency": "daily",
+    "max_per_day": 1,
+    "sla_minutes": 90,
+    "claim_timeout_minutes": 45,
+    "kind": "house",
+    "nobody_claimed_penalty": 5
+  },
+  {
+    "code": "vacuum_daily",
+    "title": "Пылесос",
+    "base_points": 18,
+    "frequency": "daily",
+    "max_per_day": 1,
+    "sla_minutes": 60,
+    "claim_timeout_minutes": 40,
+    "kind": "house",
+    "nobody_claimed_penalty": 4
+  },
+  {
+    "code": "cook_breakfast",
+    "title": "Приготовить еду",
+    "base_points": 22,
+    "frequency": "daily",
+    "max_per_day": 3,
+    "sla_minutes": 90,
+    "claim_timeout_minutes": 45,
+    "kind": "house",
+    "nobody_claimed_penalty": 6
+  },
+  {
+    "code": "wash_dishes",
+    "title": "Помыть посуду",
+    "base_points": 16,
+    "frequency": "daily",
+    "max_per_day": 3,
+    "sla_minutes": 40,
+    "claim_timeout_minutes": 35,
+    "kind": "house",
+    "nobody_claimed_penalty": 6
+  },
+  {
+    "code": "trash_out",
+    "title": "Выкинуть мусор",
+    "base_points": 12,
+    "frequency": "daily",
+    "max_per_day": 1,
+    "sla_minutes": 30,
+    "claim_timeout_minutes": 25,
+    "kind": "house",
+    "nobody_claimed_penalty": 4
+  },
+  {
+    "code": "clean_toilet",
+    "title": "Помыть туалет",
+    "base_points": 30,
+    "frequency": "weekly",
+    "max_per_day": 1,
+    "sla_minutes": 60,
+    "claim_timeout_minutes": 45,
+    "kind": "house",
+    "nobody_claimed_penalty": 8
+  },
+  {
+    "code": "clean_bath",
+    "title": "Помыть ванну",
+    "base_points": 30,
+    "frequency": "weekly",
+    "max_per_day": 1,
+    "sla_minutes": 60,
+    "claim_timeout_minutes": 45,
+    "kind": "house",
+    "nobody_claimed_penalty": 8
+  },
+  {
+    "code": "groceries_weekly",
+    "title": "Купить продукты",
+    "base_points": 28,
+    "frequency": "weekly",
+    "max_per_day": 1,
+    "sla_minutes": 120,
+    "claim_timeout_minutes": 90,
+    "kind": "house",
+    "nobody_claimed_penalty": 10
+  },
+  {
+    "code": "towel_change",
+    "title": "Заменить полотенце, кухонную тряпку",
+    "base_points": 20,
+    "frequency": "weekly",
+    "max_per_day": 1,
+    "sla_minutes": 60,
+    "claim_timeout_minutes": 45,
+    "kind": "house",
+    "nobody_claimed_penalty": 6
+  },
+  {
+    "code": "fridge_check",
+    "title": "Проверить/помыть холодильник",
+    "base_points": 24,
+    "frequency": "weekly",
+    "max_per_day": 1,
+    "sla_minutes": 60,
+    "claim_timeout_minutes": 45,
+    "kind": "house",
+    "nobody_claimed_penalty": 6
+  },
+  {
+    "code": "dust_surface",
+    "title": "Протереть пыль / зеркала / расставить обувь / убрать стол",
+    "base_points": 14,
+    "frequency": "every_2days",
+    "max_per_day": 1,
+    "sla_minutes": 45,
+    "claim_timeout_minutes": 35,
+    "kind": "house",
+    "nobody_claimed_penalty": 4
+  }
+]
