@@ -12,10 +12,9 @@ def schedule_daily_jobs(bot: Bot) -> None:
     """Ensure core periodic jobs are scheduled on the shared scheduler."""
 
     scheduler = get_scheduler()
-    try:
-        lifecycle = bot["lifecycle"]
-    except KeyError as exc:  # pragma: no cover - configuration guard
-        raise RuntimeError("Lifecycle controller is not attached to the bot") from exc
+    lifecycle = getattr(bot, "lifecycle", None)
+    if lifecycle is None:  # pragma: no cover - configuration guard
+        raise RuntimeError("Lifecycle controller is not attached to the bot")
 
     scheduler.add_job(
         lifecycle.generate_today_tasks,

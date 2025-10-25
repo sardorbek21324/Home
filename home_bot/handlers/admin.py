@@ -40,10 +40,7 @@ log = logging.getLogger(__name__)
 
 
 def _get_scheduler(bot: Bot) -> "BotScheduler | None":
-    try:
-        return bot["lifecycle"]
-    except KeyError:
-        return None
+    return getattr(bot, "lifecycle", None)
 
 
 def _require_admin(message: Message) -> bool:

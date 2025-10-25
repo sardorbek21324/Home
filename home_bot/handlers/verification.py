@@ -21,10 +21,7 @@ log = logging.getLogger(__name__)
 
 
 def _get_scheduler(bot: Bot) -> "BotScheduler | None":
-    try:
-        return bot["lifecycle"]
-    except KeyError:
-        return None
+    return getattr(bot, "lifecycle", None)
 
 
 @router.callback_query(F.data.startswith("vote:"))

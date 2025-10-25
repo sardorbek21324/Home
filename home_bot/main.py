@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import BotCommand
@@ -40,13 +41,16 @@ async def run_bot() -> None:
     global bot, dp, scheduler
 
     setup_logging()
-    logging.getLogger(__name__).info("Starting bot…")
+    logging.getLogger(__name__).info("Starting bot...")
 
     init_db()
     with session_scope() as session:
         seed_templates(session, load_seed_templates())
 
-    bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML)
+    bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     dp = Dispatcher()
     dp.include_router(start_router)
     dp.include_router(menu.router)
@@ -57,10 +61,10 @@ async def run_bot() -> None:
     dp.include_router(admin.router)
 
     shared_scheduler = init_scheduler(settings.TZ)
-    bot["scheduler"] = shared_scheduler
+    bot.scheduler = shared_scheduler
 
     scheduler = BotScheduler(bot, shared_scheduler)
-    bot["lifecycle"] = scheduler
+    bot.lifecycle = scheduler
     scheduler.start()
     await scheduler.generate_tasks_for_day(date.today())
 
