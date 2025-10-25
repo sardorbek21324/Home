@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
 from ..config import settings
@@ -25,7 +24,8 @@ from ..db.repo import (
     votes_summary,
 )
 from ..domain.constants import CLAIM_REMINDER_MINUTES, VOTE_SECOND_WAIT_MINUTES
-from ..services.notifications import task_announce_keyboard
+from ..handlers.tasks import announce_task
+from ..services.ai_advisor import draft_announce
 from ..services.scoring import missed_penalty, reward_for_completion
 from ..utils.time import (
     in_quiet_hours,
@@ -35,22 +35,44 @@ from ..utils.time import (
 )
 
 
+_SCHEDULER: AsyncIOScheduler | None = None
+
+
+def init_scheduler(tz: str) -> AsyncIOScheduler:
+    """Initialise singleton AsyncIOScheduler with the given timezone."""
+
+    global _SCHEDULER
+    if _SCHEDULER is None:
+        _SCHEDULER = AsyncIOScheduler(timezone=ZoneInfo(tz))
+        _SCHEDULER.start()
+    return _SCHEDULER
+
+
+def get_scheduler() -> AsyncIOScheduler:
+    """Return initialised scheduler or raise if not ready."""
+
+    if _SCHEDULER is None:
+        raise RuntimeError("Scheduler not initialized")
+    return _SCHEDULER
+
+
 log = logging.getLogger(__name__)
 
 
 class BotScheduler:
     """High level orchestrator for timed events."""
 
-    def __init__(self, bot) -> None:
+    def __init__(self, bot, scheduler: AsyncIOScheduler | None = None) -> None:
         self.bot = bot
-        self.scheduler = AsyncIOScheduler(timezone=ZoneInfo(settings.TZ))
+        self.scheduler = scheduler or init_scheduler(settings.TZ)
         self.quiet_hours = parse_quiet_hours(settings.QUIET_HOURS)
 
     def start(self) -> None:
-        self.scheduler.start()
-        self.scheduler.add_job(self.generate_today_tasks, CronTrigger(hour=4, minute=0))
-        self.scheduler.add_job(self.check_missed_tasks, "interval", minutes=5)
-        self.scheduler.add_job(self.check_vote_deadlines, "interval", minutes=5)
+        if not self.scheduler.running:
+            self.scheduler.start()
+        from .lifecycle import schedule_daily_jobs
+
+        schedule_daily_jobs(self.bot)
         log.info("Scheduler started")
 
     def shutdown(self) -> None:
@@ -152,11 +174,10 @@ class BotScheduler:
             claim_timeout = template.claim_timeout_minutes
             penalty_value = template.nobody_claimed_penalty if penalize else 0
             users = list(list_users(session))
-            recipients = [(user.tg_id, user.name) for user in users]
-            if not users:
+            recipient_ids = [user.tg_id for user in users if user.tg_id]
+            if not recipient_ids:
                 log.info("No users to notify for instance %s", instance_id)
                 return
-            penalty_reason = None
             if penalty_value:
                 penalty_reason = f"{template_title}: никто не взял вовремя"
                 for user in users:
@@ -169,22 +190,22 @@ class BotScheduler:
                     )
             instance.last_announce_at = datetime.utcnow()
             session.flush()
+            session.expunge(instance)
 
-        text = (
-            f"🧹 Задача: {template_title}\n"
-            f"Награда: +{base_points} баллов."
+        text = await draft_announce(
+            template_title,
+            base_points,
+            "Первый, кто нажмёт «Беру», забирает слот!",
         )
         if note:
-            text += f"\n{note}"
+            text = f"{text}\n{note}"
         if penalty_value:
-            text += f"\n⚠️ Никто не взял вовремя — штраф {penalty_value} баллов."
+            text = f"{text}\n⚠️ Никто не взял вовремя — штраф {penalty_value} баллов."
 
-        markup = task_announce_keyboard(instance_id, can_defer=True)
-        for tg_id, _ in recipients:
-            try:
-                await self.bot.send_message(tg_id, text, reply_markup=markup)
-            except Exception as exc:
-                log.warning("Failed to announce task to %s: %s", tg_id, exc)
+        try:
+            await announce_task(self.bot, recipient_ids, instance, text)
+        except Exception as exc:
+            log.warning("Failed to announce task %s: %s", instance_id, exc)
         self.schedule_claim_deadline(instance_id, claim_timeout)
         log.info("Announcement sent for instance %s", instance_id)
 

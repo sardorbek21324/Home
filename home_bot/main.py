@@ -16,7 +16,7 @@ from .config import settings
 from .db.repo import init_db, seed_templates, session_scope
 from .handlers import admin, common, menu, score, tasks, verification
 from .handlers.start import router as start_router
-from .services.scheduler import BotScheduler, load_seed_templates
+from .services.scheduler import BotScheduler, init_scheduler, load_seed_templates
 from .utils.logging import setup_logging
 
 
@@ -27,10 +27,9 @@ scheduler: BotScheduler | None = None
 
 async def set_commands(bot: Bot) -> None:
     commands = [
-        BotCommand(command="start", description="Запустить"),
-        BotCommand(command="menu", description="Меню"),
+        BotCommand(command="menu", description="Открыть меню"),
         BotCommand(command="rating", description="Таблица лидеров"),
-        BotCommand(command="balance", description="Баланс"),
+        BotCommand(command="me", description="Мой баланс"),
         BotCommand(command="history", description="История"),
         BotCommand(command="help", description="Помощь"),
     ]
@@ -57,7 +56,11 @@ async def run_bot() -> None:
     dp.include_router(verification.router)
     dp.include_router(admin.router)
 
-    scheduler = BotScheduler(bot)
+    shared_scheduler = init_scheduler(settings.TZ)
+    bot["scheduler"] = shared_scheduler
+
+    scheduler = BotScheduler(bot, shared_scheduler)
+    bot["lifecycle"] = scheduler
     scheduler.start()
     await scheduler.generate_tasks_for_day(date.today())
 

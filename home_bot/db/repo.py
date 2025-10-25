@@ -148,15 +148,19 @@ def reserve_instance(
     *,
     defer: bool,
     defer_minutes: int,
+    explicit_deferrals: int | None = None,
 ) -> datetime:
     now = datetime.utcnow()
     instance.status = TaskStatus.reserved
     instance.assigned_to = user.id
-    if defer:
+    if explicit_deferrals is not None:
+        instance.deferrals_used = min(max(explicit_deferrals, 0), 2)
+    elif defer:
         instance.deferrals_used = min(instance.deferrals_used + 1, 2)
     else:
         instance.deferrals_used = 0
-    deadline_minutes = instance.template.sla_minutes + (defer_minutes if defer else 0)
+    extra_minutes = defer_minutes if defer else 0
+    deadline_minutes = instance.template.sla_minutes + extra_minutes
     instance.reserved_until = now + timedelta(minutes=deadline_minutes)
     instance.attempts += 1
     session.flush()
