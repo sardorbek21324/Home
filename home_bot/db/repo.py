@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Iterator, Sequence
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.orm import Session
 
 from . import Base, SessionLocal, engine
@@ -23,7 +24,17 @@ from .models import (
     User,
     Vote,
     VoteValue,
+    TaskBroadcast,
 )
+from ..config import get_family_user_ids
+
+
+@dataclass(frozen=True)
+class BroadcastRecord:
+    task_id: int
+    user_id: int
+    chat_id: int
+    message_id: int
 
 
 def init_db() -> None:
@@ -58,6 +69,15 @@ def ensure_user(session: Session, tg_id: int, name: str, username: str | None) -
 
 def list_users(session: Session) -> Sequence[User]:
     return session.scalars(select(User).order_by(User.id)).all()
+
+
+def family_users(session: Session) -> Sequence[User]:
+    family_ids = get_family_user_ids()
+    if not family_ids:
+        return []
+    return session.scalars(
+        select(User).where(User.tg_id.in_(family_ids)).order_by(User.id)
+    ).all()
 
 
 def get_user_by_tg(session: Session, tg_id: int) -> User | None:
@@ -194,6 +214,34 @@ def register_vote(session: Session, instance: TaskInstance, voter: User, value: 
     return vote
 
 
+def try_claim_task(
+    session: Session,
+    *,
+    instance_id: int,
+    user_id: int,
+    reserved_until: datetime,
+    deferrals_used: int,
+) -> bool:
+    stmt = (
+        update(TaskInstance)
+        .where(
+            TaskInstance.id == instance_id,
+            TaskInstance.status == TaskStatus.open,
+        )
+        .values(
+            status=TaskStatus.reserved,
+            assigned_to=user_id,
+            reserved_until=reserved_until,
+            deferrals_used=deferrals_used,
+            attempts=TaskInstance.attempts + 1,
+            round_no=0,
+        )
+        .returning(TaskInstance.id)
+    )
+    result = session.execute(stmt).scalar_one_or_none()
+    return result is not None
+
+
 def votes_summary(session: Session, instance: TaskInstance) -> tuple[int, int]:
     counts = session.execute(
         select(Vote.value, func.count()).where(Vote.task_instance_id == instance.id).group_by(Vote.value)
@@ -209,6 +257,43 @@ def open_dispute(session: Session, instance: TaskInstance, opened_by: User, note
     session.add(dispute)
     session.flush()
     return dispute
+
+
+def add_task_broadcasts(session: Session, records: Sequence[BroadcastRecord]) -> None:
+    for record in records:
+        session.add(
+            TaskBroadcast(
+                task_id=record.task_id,
+                user_id=record.user_id,
+                chat_id=record.chat_id,
+                message_id=record.message_id,
+            )
+        )
+    if records:
+        session.flush()
+
+
+def list_task_broadcasts(session: Session, task_id: int) -> Sequence[BroadcastRecord]:
+    entries = session.scalars(
+        select(TaskBroadcast).where(TaskBroadcast.task_id == task_id)
+    ).all()
+    return [
+        BroadcastRecord(
+            task_id=entry.task_id,
+            user_id=entry.user_id,
+            chat_id=entry.chat_id,
+            message_id=entry.message_id,
+        )
+        for entry in entries
+    ]
+
+
+def pop_task_broadcasts(session: Session, task_id: int) -> Sequence[BroadcastRecord]:
+    records = list_task_broadcasts(session, task_id)
+    if records:
+        session.query(TaskBroadcast).where(TaskBroadcast.task_id == task_id).delete()
+        session.flush()
+    return records
 
 
 def resolve_dispute(session: Session, dispute: Dispute, resolved_by: User, note: str, *, approve: bool) -> None:
