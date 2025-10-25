@@ -25,7 +25,6 @@ from ..db.repo import (
     votes_summary,
 )
 from ..domain.constants import CLAIM_REMINDER_MINUTES, VOTE_SECOND_WAIT_MINUTES
-from ..services.ai_advisor import draft_announce
 from ..services.notifications import announce_task, update_verification_messages
 from ..services.scoring import missed_penalty, reward_for_completion
 from ..utils.time import (
@@ -244,10 +243,9 @@ class BotScheduler:
             allow_second = instance.deferrals_used < 2
             session.flush()
 
-        text = await draft_announce(
-            template_title,
-            base_points,
-            "Первый, кто нажмёт «Беру», забирает слот!",
+        text = (
+            f"🧹 Задача: <b>{template_title}</b> (+{base_points}). "
+            "Первый, кто нажмёт «Беру», забирает слот!"
         )
         if note:
             text = f"{text}\n{note}"

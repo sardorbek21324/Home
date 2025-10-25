@@ -17,9 +17,10 @@ from .config import settings
 from .db.repo import init_db, seed_templates, session_scope
 from .handlers import (
     admin,
-    admin_family,
+    ai_test,
     common,
     diagnostics,
+    family_admin,
     id as id_handler,
     menu,
     score,
@@ -43,11 +44,15 @@ scheduler: BotScheduler | None = None
 async def set_commands(bot: Bot) -> None:
     commands = [
         BotCommand(command="menu", description="Открыть меню"),
-        BotCommand(command="rating", description="Таблица лидеров"),
+        BotCommand(command="tasks", description="Список задач"),
         BotCommand(command="me", description="Мой баланс"),
         BotCommand(command="history", description="История"),
-        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="ai_test", description="Проверка OpenAI"),
+        BotCommand(command="family_list", description="Админ: показать family IDs"),
+        BotCommand(command="family_add", description="Админ: добавить family ID"),
+        BotCommand(command="family_remove", description="Админ: удалить family ID"),
         BotCommand(command="myid", description="Показать мой Telegram ID"),
+        BotCommand(command="selftest", description="Самотест бота"),
     ]
     try:
         await bot.set_my_commands(commands)
@@ -61,7 +66,6 @@ async def run_bot() -> None:
     global bot, dp, scheduler
 
     setup_logging()
-    admin_family.initialize_family_cache(log=True)
     logging.getLogger(__name__).info("Starting bot...")
 
     init_db()
@@ -78,10 +82,11 @@ async def run_bot() -> None:
     dp.include_router(id_handler.router)
     dp.include_router(menu.router)
     dp.include_router(common.router)
+    dp.include_router(ai_test.router)
     dp.include_router(score.router)
     dp.include_router(tasks.router)
     dp.include_router(verification.router)
-    dp.include_router(admin_family.router)
+    dp.include_router(family_admin.router)
     dp.include_router(admin.router)
     dp.include_router(diagnostics.router)
 
@@ -94,7 +99,7 @@ async def run_bot() -> None:
     try:
         while True:
             try:
-                await dp.start_polling(bot, polling_timeout=20)
+                await dp.start_polling(bot)
             except TelegramRetryAfter as exc:
                 delay = exc.retry_after + 1
                 logging.getLogger(__name__).warning("Telegram rate limit. Sleep %s s", delay)

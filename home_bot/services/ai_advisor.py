@@ -1,112 +1,107 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
+import os
+from typing import Optional
 
-from ..config import settings
+from pydantic import BaseModel
 
 try:
-    from openai import OpenAI
-except Exception:  # pragma: no cover - optional dependency
-    OpenAI = None
+    # OpenAI SDK v1.x
+    from openai import AsyncOpenAI
+except Exception:  # pragma: no cover
+    AsyncOpenAI = None  # type: ignore
 
 
-log = logging.getLogger(__name__)
-
-_client: OpenAI | None = None
-
-
-def ai_enabled() -> bool:
-    """Return True if OpenAI integration is configured."""
-
-    return bool(settings.OPENAI_KEY and OpenAI is not None)
+DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+_OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 
-def _cli() -> OpenAI | None:
-    global _client
-    if not ai_enabled():
-        return None
-    if _client is None:
+class AIAdvice(BaseModel):
+    title: str
+    text: str
+
+
+class AIAdvisor:
+    """
+    Безопасная обёртка вокруг OpenAI. Если ключа нет или SDK не установлен,
+    методы возвращают понятные ошибки, а не падают.
+    """
+
+    def __init__(self) -> None:
+        self.enabled = bool(_OPENAI_API_KEY and AsyncOpenAI is not None)
+        self._client: Optional[AsyncOpenAI] = None
+        if self.enabled:
+            # Конструируем клиент лениво, в первом вызове, чтобы не падать при импорте
+            self._client = AsyncOpenAI(api_key=_OPENAI_API_KEY)
+
+    async def healthcheck(self) -> str:
+        """
+        Лёгкая проверка доступности OpenAI с таймаутом.
+        Возвращает "ok" или строку вида "ошибка — <тип>".
+        """
+        if not AsyncOpenAI:
+            return "ошибка — SDK not installed"
+        if not _OPENAI_API_KEY:
+            return "ошибка — no API key"
+
         try:
-            _client = OpenAI(api_key=settings.OPENAI_KEY)
-        except Exception as exc:  # pragma: no cover - network
-            log.info("OpenAI client init failed: %s", exc)
-            _client = None
-    return _client
+            assert self._client is not None
+            # Мини-запрос с маленьким токен-лимитом
+            resp = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a healthcheck."},
+                        {"role": "user", "content": "echo ok"},
+                    ],
+                    max_tokens=5,
+                ),
+                timeout=15,
+            )
+            txt = resp.choices[0].message.content if resp.choices else ""
+            return "ok" if (txt and "ok" in txt.lower()) else "ошибка — empty response"
+        except asyncio.TimeoutError:
+            return "ошибка — TimeoutError"
+        except Exception as e:
+            return f"ошибка — {type(e).__name__}"
 
+    async def suggest_daily_focus(self, context: str) -> AIAdvice:
+        """
+        Возвращает короткий совет дня для дома и распределения работ.
+        При недоступности ИИ — отдаём дефолтный совет без падения.
+        """
+        if not self.enabled:
+            return AIAdvice(
+                title="Совет дня",
+                text="ИИ недоступен. Используем базовое расписание.",
+            )
 
-def weekly_patch(summary_json: dict) -> dict:
-    client = _cli()
-    if client is None:
-        log.info("OpenAI disabled; returning empty patch.")
-        return {}
-    prompt = (
-        "You are a balance advisor for a household gamified bot. "
-        "Given the weekly aggregate JSON, propose adjustments within corridors: "
-        "increase/decrease task points within provided min/max; propose one-day booster events; "
-        "and short motivation text. Respond JSON with keys: increase_points, decrease_points, events, message."
-    )
-    messages = [
-        {"role": "system", "content": "Be concise and safe. Do not include PII."},
-        {"role": "user", "content": prompt},
-        {"role": "user", "content": json.dumps(summary_json)},
-    ]
-    try:
-        res = client.chat.completions.create(model="gpt-4o-mini", messages=messages, temperature=0.4)
-        txt = res.choices[0].message.content
-        patch = json.loads(txt)
-        return patch
-    except Exception as exc:  # pragma: no cover - network
-        log.info("OpenAI advisor failed: %s", exc)
-        return {}
-
-
-async def draft_announce(template_title: str, points: int, bonus_hint: str) -> str:
-    """Generate friendly announce text using OpenAI with fallback."""
-
-    client = _cli()
-    default_text = f"🧹 Задача: <b>{template_title}</b> (+{points}). {bonus_hint}"
-    if client is None:
-        return default_text
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Ты короткий мотивационный помощник. Пиши дружелюбно и по делу.",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Сформулируй анонс задачи '{template_title}' на +{points} баллов. "
-                        "Добавь мотивацию и напомни про бонус первому, но не занимай >160 символов."
-                    ),
-                },
-            ],
-            temperature=0.7,
-        )
-        message = resp.choices[0].message.content or ""
-        return message.strip() or default_text
-    except Exception as exc:  # pragma: no cover - network
-        log.info("OpenAI draft announce failed: %s", exc)
-        return default_text
-
-
-async def quick_ai_ping() -> str:
-    """Perform a lightweight API call to verify OpenAI availability."""
-
-    if not settings.OPENAI_KEY or OpenAI is None:
-        return "AI: ключ не задан — пропускаю."
-    try:
-        client = OpenAI(api_key=settings.OPENAI_KEY)
-        await asyncio.to_thread(
-            client.chat.completions.create,
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
-        return "AI: ok"
-    except Exception as exc:  # pragma: no cover - network
-        return f"AI: ошибка — {exc.__class__.__name__}"
+        try:
+            assert self._client is not None
+            resp = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Ты — ассистент по домашним делам. "
+                                "Дай 1–2 коротких фокус-приоритета на день."
+                            ),
+                        },
+                        {"role": "user", "content": context},
+                    ],
+                    temperature=0.4,
+                    max_tokens=200,
+                ),
+                timeout=25,
+            )
+            msg = resp.choices[0].message.content.strip() if resp.choices else ""
+            if not msg:
+                return AIAdvice(title="Совет дня", text="Сегодня работаем по плану.")
+            return AIAdvice(title="Совет дня", text=msg)
+        except asyncio.TimeoutError:
+            return AIAdvice(title="Совет дня", text="Время ожидания ИИ истекло.")
+        except Exception as e:
+            return AIAdvice(title="Совет дня", text=f"ИИ недоступен: {type(e).__name__}")
