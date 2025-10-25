@@ -1,18 +1,20 @@
 """Handlers providing personal identification commands."""
 
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
+
 
 router = Router()
 
 
-@router.message(commands=["myid", "getid", "id"])
+@router.message(Command("myid", "getid", "id"))
 async def cmd_myid(message: Message) -> None:
     """Return the Telegram identifier of the current user."""
 
     user = message.from_user
     if not user:
-        await message.answer("Не удалось определить ваш Telegram ID.")
+        await message.answer("❌ Не удалось определить ваш Telegram ID.")
         return
 
     uid = user.id
