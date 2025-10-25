@@ -22,6 +22,7 @@ def schedule_daily_jobs(bot: Bot) -> None:
         CronTrigger(hour=4, minute=0),
         id="tasks:daily",
         replace_existing=True,
+        misfire_grace_time=0,
     )
     scheduler.add_job(
         lifecycle.check_missed_tasks,
@@ -29,6 +30,8 @@ def schedule_daily_jobs(bot: Bot) -> None:
         minutes=10,
         id="tasks:missed",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     scheduler.add_job(
         lifecycle.check_vote_deadlines,
@@ -36,4 +39,6 @@ def schedule_daily_jobs(bot: Bot) -> None:
         minutes=5,
         id="tasks:votes",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )

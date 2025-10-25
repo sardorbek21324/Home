@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Iterator, Sequence
 
 from sqlalchemy import and_, func, select
@@ -119,7 +119,19 @@ def create_instance(
     slot: int,
     status: TaskStatus = TaskStatus.open,
 ) -> TaskInstance:
-    instance = TaskInstance(template=template, day=day, slot=slot, status=status)
+    now = datetime.now(timezone.utc)
+    next_check_at = None
+    if template.claim_timeout_minutes:
+        next_check_at = now + timedelta(minutes=template.claim_timeout_minutes)
+    instance = TaskInstance(
+        template=template,
+        day=day,
+        slot=slot,
+        status=status,
+        created_at=now,
+        round_no=0,
+        next_check_at=next_check_at,
+    )
     session.add(instance)
     session.flush()
     return instance
