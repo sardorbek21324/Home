@@ -1,21 +1,31 @@
-"""Handle voting callbacks and dispute workflow."""
+from __future__ import annotations
+
+"""Handlers responsible for peer verification of reports."""
+
+import logging
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
 from ..db.models import TaskInstance, TaskStatus, User, Vote, VoteValue
-from ..db.repo import add_score_event, register_vote, session_scope, votes_summary
+from ..db.repo import add_score_event, open_dispute, register_vote, session_scope, votes_summary
+from ..main import scheduler
 from ..services.scoring import reward_for_completion
 
 
 router = Router()
+log = logging.getLogger(__name__)
 
 
 @router.callback_query(F.data.startswith("vote:"))
 async def handle_vote(cb: CallbackQuery) -> None:
     if cb.from_user is None:
         return
-    _, inst_id_str, value = cb.data.split(":")
+    parts = cb.data.split(":")
+    if len(parts) != 3:
+        await cb.answer()
+        return
+    _, inst_id_str, value = parts
     instance_id = int(inst_id_str)
 
     performer_tg_id = None
@@ -47,6 +57,13 @@ async def handle_vote(cb: CallbackQuery) -> None:
         template_title = instance.template.title
         performer = session.get(User, instance.assigned_to) if instance.assigned_to else None
         performer_tg_id = performer.tg_id if performer else None
+        total_votes = yes + no
+
+        if scheduler:
+            if total_votes == 1:
+                scheduler.schedule_vote_deadline(instance.id)
+            elif total_votes >= 2:
+                scheduler.cancel_vote_deadline(instance.id)
 
         if yes >= 2:
             decision = "approved"
@@ -66,14 +83,30 @@ async def handle_vote(cb: CallbackQuery) -> None:
                 instance.status = TaskStatus.approved
                 feedback = f"✅ {template_title} подтверждено. +{reward} баллов."
             else:
-                instance.status = TaskStatus.rejected
-                feedback = f"❌ {template_title} отклонено. Баллы не начислены."
+                open_dispute(
+                    session,
+                    instance,
+                    voter,
+                    note="Отклонено голосованием",
+                )
+                feedback = (
+                    f"❌ {template_title} отклонено. Решение отправлено в споры."
+                )
         else:
             feedback = "Голос принят. Ждём остальных."
 
     if performer_tg_id and decision:
         try:
             await cb.bot.send_message(performer_tg_id, feedback)
-        except Exception:
-            pass
-    await cb.answer(feedback if decision else "Голос учтён.")
+        except Exception as exc:
+            log.warning("Failed to deliver vote result to %s: %s", performer_tg_id, exc)
+    await cb.answer(feedback if decision else "Голос учтён. Ждём остальных.")
+    log.info(
+        "Vote %s recorded for instance %s by %s (yes=%s, no=%s, decision=%s)",
+        value,
+        instance_id,
+        cb.from_user.full_name,
+        yes,
+        no,
+        decision,
+    )

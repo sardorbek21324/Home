@@ -8,7 +8,7 @@ def task_announce_keyboard(instance_id: int, *, can_defer: bool, can_cancel: boo
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Беру", callback_data=f"task:claim:{instance_id}:now")
     if can_defer:
-        builder.button(text="⏳ Беру через 30 мин", callback_data=f"task:claim:{instance_id}:defer")
+        builder.button(text="⏳ Беру через 30 мин (−20%)", callback_data=f"task:claim:{instance_id}:defer")
     if can_cancel:
         builder.button(text="↩️ Отмена", callback_data=f"task:cancel:{instance_id}")
     builder.adjust(1)

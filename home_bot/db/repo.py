@@ -82,7 +82,7 @@ def reset_month(session: Session, season_label: str) -> User | None:
                 ScoreEvent(
                     user=user,
                     delta=-user.score,
-                    reason=f"Сезон {season_label}: обнуление",
+                    reason=f"Season {season_label}: reset",
                     season=season_label,
                 )
             )
@@ -141,16 +141,26 @@ def find_open_instances(session: Session) -> Sequence[TaskInstance]:
     ).all()
 
 
-def reserve_instance(session: Session, instance: TaskInstance, user: User, *, defer: bool, defer_minutes: int) -> None:
+def reserve_instance(
+    session: Session,
+    instance: TaskInstance,
+    user: User,
+    *,
+    defer: bool,
+    defer_minutes: int,
+) -> datetime:
+    now = datetime.utcnow()
     instance.status = TaskStatus.reserved
     instance.assigned_to = user.id
-    instance.deferrals_used = instance.deferrals_used + (1 if defer else 0)
     if defer:
-        instance.reserved_until = datetime.utcnow() + timedelta(minutes=defer_minutes)
+        instance.deferrals_used = min(instance.deferrals_used + 1, 2)
     else:
-        instance.reserved_until = datetime.utcnow()
+        instance.deferrals_used = 0
+    deadline_minutes = instance.template.sla_minutes + (defer_minutes if defer else 0)
+    instance.reserved_until = now + timedelta(minutes=deadline_minutes)
     instance.attempts += 1
     session.flush()
+    return instance.reserved_until
 
 
 def submit_report(session: Session, instance: TaskInstance, user: User, file_id: str) -> Report:
@@ -222,3 +232,15 @@ def todays_history(session: Session, user: User) -> Sequence[ScoreEvent]:
         )
         .order_by(ScoreEvent.created_at.desc())
     ).all()
+
+
+def list_open_disputes(session: Session) -> Sequence[Dispute]:
+    return session.scalars(
+        select(Dispute)
+        .where(Dispute.state == DisputeState.open)
+        .order_by(Dispute.created_at.asc())
+    ).all()
+
+
+def get_dispute(session: Session, dispute_id: int) -> Dispute | None:
+    return session.get(Dispute, dispute_id)

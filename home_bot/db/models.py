@@ -85,10 +85,10 @@ class TaskInstance(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     template_id: Mapped[int] = mapped_column(ForeignKey("task_templates.id"))
-    day: Mapped[date] = mapped_column(Date)
+    day: Mapped[date] = mapped_column(Date, index=True)
     slot: Mapped[int] = mapped_column(Integer, default=1)
-    status: Mapped[TaskStatus] = mapped_column(Enum(TaskStatus), default=TaskStatus.open)
-    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[TaskStatus] = mapped_column(Enum(TaskStatus), default=TaskStatus.open, index=True)
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     reserved_until: Mapped[datetime | None] = mapped_column(DateTime)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     deferrals_used: Mapped[int] = mapped_column(Integer, default=0)
@@ -105,8 +105,8 @@ class Report(Base):
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     photo_file_id: Mapped[str] = mapped_column(String(255))
     submitted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -119,8 +119,8 @@ class Vote(Base):
     __table_args__ = (UniqueConstraint("task_instance_id", "voter_id", name="uq_vote_unique"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"))
-    voter_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"), index=True)
+    voter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     value: Mapped[VoteValue] = mapped_column(Enum(VoteValue))
     voted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -132,10 +132,10 @@ class ScoreEvent(Base):
     __tablename__ = "score_events"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     delta: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(255))
-    task_instance_id: Mapped[int | None] = mapped_column(ForeignKey("task_instances.id"))
+    task_instance_id: Mapped[int | None] = mapped_column(ForeignKey("task_instances.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     season: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
@@ -147,10 +147,10 @@ class Dispute(Base):
     __tablename__ = "disputes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"))
-    opened_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    state: Mapped[DisputeState] = mapped_column(Enum(DisputeState), default=DisputeState.open)
-    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    task_instance_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"), index=True)
+    opened_by: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    state: Mapped[DisputeState] = mapped_column(Enum(DisputeState), default=DisputeState.open, index=True)
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     note: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
