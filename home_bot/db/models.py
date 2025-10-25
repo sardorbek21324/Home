@@ -159,3 +159,15 @@ class Dispute(Base):
 
     task_instance: Mapped[TaskInstance] = relationship(back_populates="dispute")
 
+
+class TaskBroadcast(Base):
+    __tablename__ = "task_broadcasts"
+    __table_args__ = (UniqueConstraint("task_id", "user_id", name="uq_task_broadcast"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("task_instances.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    chat_id: Mapped[int] = mapped_column(Integer)
+    message_id: Mapped[int] = mapped_column(Integer)
+
+

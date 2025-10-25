@@ -16,10 +16,22 @@ log = logging.getLogger(__name__)
 _client: OpenAI | None = None
 
 
+def ai_enabled() -> bool:
+    """Return True if OpenAI integration is configured."""
+
+    return bool(settings.OPENAI_API_KEY and OpenAI is not None)
+
+
 def _cli() -> OpenAI | None:
     global _client
-    if _client is None and settings.OPENAI_API_KEY and OpenAI is not None:
-        _client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    if not ai_enabled():
+        return None
+    if _client is None:
+        try:
+            _client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        except Exception as exc:  # pragma: no cover - network
+            log.info("OpenAI client init failed: %s", exc)
+            _client = None
     return _client
 
 
@@ -44,8 +56,8 @@ def weekly_patch(summary_json: dict) -> dict:
         txt = res.choices[0].message.content
         patch = json.loads(txt)
         return patch
-    except Exception as e:
-        log.exception("OpenAI advisor failed: %s", e)
+    except Exception as exc:  # pragma: no cover - network
+        log.info("OpenAI advisor failed: %s", exc)
         return {}
 
 
@@ -53,8 +65,9 @@ async def draft_announce(template_title: str, points: int, bonus_hint: str) -> s
     """Generate friendly announce text using OpenAI with fallback."""
 
     client = _cli()
+    default_text = f"🧹 Задача: <b>{template_title}</b> (+{points}). {bonus_hint}"
     if client is None:
-        return f"🧹 Задача: <b>{template_title}</b> (+{points}). {bonus_hint}"
+        return default_text
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -74,7 +87,7 @@ async def draft_announce(template_title: str, points: int, bonus_hint: str) -> s
             temperature=0.7,
         )
         message = resp.choices[0].message.content or ""
-        return message.strip() or f"🧹 Задача: <b>{template_title}</b> (+{points}). {bonus_hint}"
-    except Exception as exc:
-        log.warning("OpenAI draft announce failed: %s", exc)
-        return f"🧹 Задача: <b>{template_title}</b> (+{points}). {bonus_hint}"
+        return message.strip() or default_text
+    except Exception as exc:  # pragma: no cover - network
+        log.info("OpenAI draft announce failed: %s", exc)
+        return default_text

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, List
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     DATABASE_URL: str = Field(default_factory=_default_database_url)
     ADMIN_IDS: list[int] = Field(default_factory=list)
+    FAMILY_IDS: list[int] = Field(default_factory=list)
+    ANNOUNCE_CUTOFF_MINUTES: int = 10
     TZ: str = "Europe/Warsaw"
     QUIET_HOURS: str = "23:00-08:00"
 
@@ -64,6 +66,11 @@ class Settings(BaseSettings):
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
     def _validate_admin_ids(cls, value: Any) -> list[int]:
+        return _coerce_admin_ids(value)
+
+    @field_validator("FAMILY_IDS", mode="before")
+    @classmethod
+    def _validate_family_ids(cls, value: Any) -> list[int]:
         return _coerce_admin_ids(value)
 
     @field_validator("BOT_TOKEN")
@@ -75,3 +82,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()  # type: ignore[arg-type]
+
+
+def get_family_user_ids() -> List[int]:
+    """Return configured Telegram user ids for the family circle."""
+
+    if settings.FAMILY_IDS:
+        return settings.FAMILY_IDS
+    return settings.ADMIN_IDS

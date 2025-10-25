@@ -22,6 +22,7 @@ def schedule_daily_jobs(bot: Bot) -> None:
         id="tasks:daily",
         replace_existing=True,
         misfire_grace_time=60,
+        coalesce=True,
     )
     scheduler.add_job(
         lifecycle.check_missed_tasks,
@@ -31,6 +32,7 @@ def schedule_daily_jobs(bot: Bot) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=60,
     )
     scheduler.add_job(
         lifecycle.check_vote_deadlines,
@@ -40,4 +42,5 @@ def schedule_daily_jobs(bot: Bot) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=60,
     )
