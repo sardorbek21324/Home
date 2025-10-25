@@ -15,7 +15,17 @@ from datetime import date
 
 from .config import settings
 from .db.repo import init_db, seed_templates, session_scope
-from .handlers import admin, common, diagnostics, id as id_handler, menu, score, tasks, verification
+from .handlers import (
+    admin,
+    admin_family,
+    common,
+    diagnostics,
+    id as id_handler,
+    menu,
+    score,
+    tasks,
+    verification,
+)
 from .handlers.start import router as start_router
 from .services.scheduler import (
     BotScheduler,
@@ -51,6 +61,7 @@ async def run_bot() -> None:
     global bot, dp, scheduler
 
     setup_logging()
+    admin_family.initialize_family_cache(log=True)
     logging.getLogger(__name__).info("Starting bot...")
 
     init_db()
@@ -70,6 +81,7 @@ async def run_bot() -> None:
     dp.include_router(score.router)
     dp.include_router(tasks.router)
     dp.include_router(verification.router)
+    dp.include_router(admin_family.router)
     dp.include_router(admin.router)
     dp.include_router(diagnostics.router)
 
