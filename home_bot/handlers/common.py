@@ -10,11 +10,16 @@ router = Router()
 
 @router.message(Command("help"))
 async def help_command(message: Message) -> None:
-    await message.answer(
+    text = (
         "Команды:\n"
         "/menu — открыть меню\n"
+        "/tasks — задачи сегодня\n"
         "/rating — таблица лидеров\n"
         "/me — мой баланс\n"
         "/history — история операций\n"
-        "Админы: /announce, /add_task, /end_month, /disputes"
+        "/myid — узнать свой Telegram ID\n"
+        "/selftest — самодиагностика\n"
+        "/ai_test — проверка OpenAI\n"
+        "Админы: /family_list, /family_add, /family_remove, /regen_today, /debug_jobs"
     )
+    await message.answer(text)

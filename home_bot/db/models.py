@@ -6,7 +6,16 @@ from datetime import date, datetime
 from enum import Enum as PyEnum
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from . import Base
@@ -57,6 +66,13 @@ class User(Base):
 
     reports: Mapped[list["Report"]] = relationship(back_populates="user")
     events: Mapped[list["ScoreEvent"]] = relationship(back_populates="user")
+
+
+class FamilyMember(Base):
+    __tablename__ = "family_members"
+
+    tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class TaskTemplate(Base):

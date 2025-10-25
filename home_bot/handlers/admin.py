@@ -115,6 +115,22 @@ async def add_task(message: Message) -> None:
     log.info("Admin %s added task template %s", message.from_user.id, code)
 
 
+@router.message(Command("regen_today"))
+async def regen_today(message: Message) -> None:
+    if not _require_admin(message):
+        await message.answer("Команда доступна только администраторам.")
+        return
+
+    lifecycle = _get_scheduler()
+    if lifecycle is None:
+        await message.answer("Планировщик не инициализирован.")
+        return
+
+    await lifecycle.generate_today_tasks()
+    await message.answer("Задачи на сегодня пересозданы.")
+    log.info("Admin %s triggered regen_today", message.from_user.id)
+
+
 @router.message(Command("disputes"))
 async def list_disputes(message: Message) -> None:
     if not _require_admin(message):

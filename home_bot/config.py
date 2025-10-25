@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     ADMIN_IDS_ENV: str | None = Field(default_factory=lambda: os.getenv("ADMIN_IDS"))
     FAMILY_IDS_ENV: str | None = Field(default_factory=lambda: os.getenv("FAMILY_IDS"))
 
+    admin_ids_cache: list[int] | None = None
+    family_ids_cache: list[int] | None = None
+
     model_config = SettingsConfigDict(
         env_prefix="",
         env_file=".env",
@@ -63,11 +66,21 @@ class Settings(BaseSettings):
 
     @property
     def ADMIN_IDS(self) -> list[int]:
+        if self.admin_ids_cache is not None:
+            return list(self.admin_ids_cache)
         return _parse_ids(self.ADMIN_IDS_ENV, ADMIN_IDS_DEFAULT)
 
     @property
     def FAMILY_IDS(self) -> list[int]:
+        if self.family_ids_cache is not None:
+            return list(self.family_ids_cache)
         return _parse_ids(self.FAMILY_IDS_ENV, FAMILY_IDS_DEFAULT)
+
+    def set_admin_ids(self, values: Sequence[int]) -> None:
+        self.admin_ids_cache = list(values)
+
+    def set_family_ids(self, values: Sequence[int]) -> None:
+        self.family_ids_cache = list(values)
 
 
 settings = Settings()
