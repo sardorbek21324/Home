@@ -126,9 +126,9 @@ async def regen_today(message: Message) -> None:
         await message.answer("Планировщик не инициализирован.")
         return
 
-    await lifecycle.generate_today_tasks()
-    await message.answer("Задачи на сегодня пересозданы.")
-    log.info("Admin %s triggered regen_today", message.from_user.id)
+    created = await lifecycle.regenerate_today()
+    await message.answer(f"Задачи на сегодня обновлены. Создано: {created}.")
+    log.info("Admin %s triggered regen_today (created=%s)", message.from_user.id, created)
 
 
 @router.message(Command("disputes"))

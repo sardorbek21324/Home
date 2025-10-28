@@ -1,13 +1,12 @@
-"""Project settings helpers."""
+"""Project settings helpers using Pydantic settings management."""
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-from typing import List, Sequence
+from typing import Iterable, Sequence
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,19 +17,32 @@ def _default_database_url() -> str:
     return f"sqlite:///{db_path}"
 
 
-def _parse_ids(env_value: str | None, fallback: list[int]) -> list[int]:
-    if not env_value:
-        return fallback
-    s = env_value.strip()
-    if not s:
-        return fallback
-    try:
-        if s.startswith("["):
-            arr = json.loads(s)
-            return [int(x) for x in arr]
-        return [int(x) for x in s.split(",") if x.strip()]
-    except Exception:
-        return fallback
+def _normalize_ids(value: object, fallback: Sequence[int]) -> list[int]:
+    """Parse JSON or comma separated identifiers into a list of ints."""
+
+    if value is None:
+        return list(fallback)
+    if isinstance(value, str):
+        data = value.strip()
+        if not data:
+            return list(fallback)
+        try:
+            if data.startswith("["):
+                raw = json.loads(data)
+            else:
+                raw = [part.strip() for part in data.split(",") if part.strip()]
+        except json.JSONDecodeError:
+            return list(fallback)
+        try:
+            return [int(item) for item in raw]
+        except (TypeError, ValueError):
+            return list(fallback)
+    if isinstance(value, Iterable):
+        try:
+            return [int(item) for item in value]
+        except (TypeError, ValueError):
+            return list(fallback)
+    return list(fallback)
 
 
 ADMIN_IDS_DEFAULT = [133405512]
@@ -40,23 +52,6 @@ FAMILY_IDS_DEFAULT = [133405512, 310837917, 389957226]
 class Settings(BaseSettings):
     """Runtime configuration loaded from the environment."""
 
-    BOT_TOKEN: str
-    OPENAI_API_KEY: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OPENAI_API_KEY", "OPENAI_KEY"),
-    )
-    OPENAI_MODEL: str = "gpt-4o-mini"
-    DATABASE_URL: str = Field(default_factory=_default_database_url)
-    ANNOUNCE_CUTOFF_MINUTES: int = 10
-    TZ: str = "Europe/Warsaw"
-    QUIET_HOURS: str = "23:00-08:00"
-
-    ADMIN_IDS_ENV: str | None = Field(default_factory=lambda: os.getenv("ADMIN_IDS"))
-    FAMILY_IDS_ENV: str | None = Field(default_factory=lambda: os.getenv("FAMILY_IDS"))
-
-    admin_ids_cache: list[int] | None = None
-    family_ids_cache: list[int] | None = None
-
     model_config = SettingsConfigDict(
         env_prefix="",
         env_file=".env",
@@ -64,29 +59,82 @@ class Settings(BaseSettings):
         protected_namespaces=(),
     )
 
-    @property
-    def ADMIN_IDS(self) -> list[int]:
-        if self.admin_ids_cache is not None:
-            return list(self.admin_ids_cache)
-        return _parse_ids(self.ADMIN_IDS_ENV, ADMIN_IDS_DEFAULT)
+    bot_token: str = Field(validation_alias=AliasChoices("BOT_TOKEN"))
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "OPENAI_KEY"),
+    )
+    openai_model: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("OPENAI_MODEL"))
+    database_url: str = Field(default_factory=_default_database_url, validation_alias=AliasChoices("DATABASE_URL"))
+    announce_cutoff_minutes: int = Field(default=10, validation_alias=AliasChoices("ANNOUNCE_CUTOFF_MINUTES"))
+    tz: str = Field(default="Europe/Warsaw", validation_alias=AliasChoices("TZ"))
+    quiet_hours: str = Field(default="23:00-08:00", validation_alias=AliasChoices("QUIET_HOURS"))
+    admin_ids: list[int] = Field(
+        default_factory=lambda: list(ADMIN_IDS_DEFAULT),
+        validation_alias=AliasChoices("ADMIN_IDS"),
+    )
+    family_ids: list[int] = Field(
+        default_factory=lambda: list(FAMILY_IDS_DEFAULT),
+        validation_alias=AliasChoices("FAMILY_IDS"),
+    )
+
+    @field_validator("admin_ids", mode="before")
+    @classmethod
+    def _parse_admin_ids(cls, value: object) -> list[int]:
+        return _normalize_ids(value, ADMIN_IDS_DEFAULT)
+
+    @field_validator("family_ids", mode="before")
+    @classmethod
+    def _parse_family_ids(cls, value: object) -> list[int]:
+        return _normalize_ids(value, FAMILY_IDS_DEFAULT)
 
     @property
-    def FAMILY_IDS(self) -> list[int]:
-        if self.family_ids_cache is not None:
-            return list(self.family_ids_cache)
-        return _parse_ids(self.FAMILY_IDS_ENV, FAMILY_IDS_DEFAULT)
+    def BOT_TOKEN(self) -> str:  # noqa: N802 - legacy compatibility
+        return self.bot_token
+
+    @property
+    def OPENAI_API_KEY(self) -> str | None:  # noqa: N802 - legacy compatibility
+        return self.openai_api_key
+
+    @property
+    def OPENAI_MODEL(self) -> str:  # noqa: N802 - legacy compatibility
+        return self.openai_model
+
+    @property
+    def DATABASE_URL(self) -> str:  # noqa: N802 - legacy compatibility
+        return self.database_url
+
+    @property
+    def ANNOUNCE_CUTOFF_MINUTES(self) -> int:  # noqa: N802 - legacy compatibility
+        return self.announce_cutoff_minutes
+
+    @property
+    def TZ(self) -> str:  # noqa: N802 - legacy compatibility
+        return self.tz
+
+    @property
+    def QUIET_HOURS(self) -> str:  # noqa: N802 - legacy compatibility
+        return self.quiet_hours
+
+    @property
+    def ADMIN_IDS(self) -> list[int]:  # noqa: N802 - legacy compatibility
+        return list(self.admin_ids)
+
+    @property
+    def FAMILY_IDS(self) -> list[int]:  # noqa: N802 - legacy compatibility
+        return list(self.family_ids)
 
     def set_admin_ids(self, values: Sequence[int]) -> None:
-        self.admin_ids_cache = list(values)
+        self.admin_ids = list(values)
 
     def set_family_ids(self, values: Sequence[int]) -> None:
-        self.family_ids_cache = list(values)
+        self.family_ids = list(values)
 
 
 settings = Settings()
 
 
-def get_family_user_ids() -> List[int]:
+def get_family_user_ids() -> list[int]:
     """Return configured Telegram user ids for the family circle."""
 
     return list(settings.FAMILY_IDS)

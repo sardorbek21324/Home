@@ -29,7 +29,7 @@ def schedule_daily_jobs(bot: Bot) -> None:
 
     scheduler.add_job(
         lifecycle.generate_today_tasks,
-        CronTrigger(hour=4, minute=0, timezone=tz),
+        CronTrigger(hour=8, minute=0, timezone=tz),
         id="tasks:daily",
         **common,
     )

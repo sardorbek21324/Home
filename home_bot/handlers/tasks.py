@@ -45,24 +45,34 @@ def build_tasks_overview() -> str:
     """Return human friendly summary of open/reserved tasks."""
 
     with session_scope() as session:
-        instances = (
+        rows = (
             session.query(TaskInstance)
             .filter(TaskInstance.status.in_([TaskStatus.open, TaskStatus.reserved]))
             .order_by(TaskInstance.created_at.asc())
             .all()
         )
+        instances = [
+            {
+                "title": inst.template.title,
+                "base_points": inst.template.base_points,
+                "status": inst.status,
+                "deferrals": inst.deferrals_used or 0,
+                "attempts": inst.attempts,
+            }
+            for inst in rows
+        ]
 
     if not instances:
         return "🎉 Все задания разобраны. Можно сделать перерыв!"
 
     lines = ["📋 Доступные задачи сегодня:"]
     for inst in instances:
-        status = "🟢 свободна" if inst.status == TaskStatus.open else "🛠 в работе"
-        defer = inst.deferrals_used or 0
+        status = "🟢 свободна" if inst["status"] == TaskStatus.open else "🛠 в работе"
+        defer = inst["deferrals"]
         bar = "▓" * max(1, 5 - defer) + "░" * defer
         lines.append(
-            f"• <b>{inst.template.title}</b> (+{inst.template.base_points})\n"
-            f"  {status} | попыток: {inst.attempts} | прогресс: {bar}"
+            f"• <b>{inst['title']}</b> (+{inst['base_points']})\n"
+            f"  {status} | попыток: {inst['attempts']} | прогресс: {bar}"
         )
     lines.append("\nЖми на кнопку под задачей в чате, чтобы взять её в работу.")
     return "\n".join(lines)

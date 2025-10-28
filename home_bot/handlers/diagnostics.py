@@ -12,6 +12,10 @@ from ..config import settings
 from ..services.ai_advisor import AIAdvisor
 from ..services.scheduler import get_scheduler
 
+
+def _is_admin(user_id: int | None) -> bool:
+    return bool(user_id and user_id in settings.ADMIN_IDS)
+
 router = Router()
 
 
@@ -29,6 +33,8 @@ async def selftest(message: Message) -> None:
         f"- {job.id}: next={job.next_run_time.isoformat() if job.next_run_time else '—'}"
         for job in jobs
     ) or "—"
+    timezone = settings.TZ
+    job_count = len(jobs)
 
     try:
         await message.bot.get_me()
@@ -45,9 +51,10 @@ async def selftest(message: Message) -> None:
         Admins: {admins}
         Family: {family}
         Scheduler running: {running}
-        Jobs:
+        Scheduler timezone: {timezone}
+        Scheduled jobs ({job_count}):
         {jobs_info}
-        Telegram: {tg_status}
+        Telegram API: {tg_status}
         AI: {ai_status}
         Если что-то '—' или 'ошибка' — проверь настройки.
         """
@@ -58,6 +65,9 @@ async def selftest(message: Message) -> None:
 
 @router.message(Command("debug_jobs"))
 async def debug_jobs(message: Message) -> None:
+    if not _is_admin(message.from_user and message.from_user.id):
+        await message.answer("Команда доступна только администраторам.")
+        return
     scheduler = get_scheduler()
     jobs = scheduler.get_jobs()
     if not jobs:
