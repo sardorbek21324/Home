@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from aiogram import Router
 from aiogram.filters import Command
+from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
 
 from ..db.models import ScoreEvent, User

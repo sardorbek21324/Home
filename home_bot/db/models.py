@@ -96,6 +96,7 @@ class TaskTemplate(Base):
 class TaskInstance(Base):
     __tablename__ = "task_instances"
     __table_args__ = (
+        UniqueConstraint("template_id", "day", name="uq_instance_template_day"),
         UniqueConstraint("template_id", "day", "slot", name="uq_instance_template_day_slot"),
     )
 

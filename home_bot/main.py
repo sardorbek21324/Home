@@ -100,7 +100,7 @@ async def run_bot() -> None:
     set_lifecycle_controller(shared_scheduler)
     shared_scheduler.start()
     dp["scheduler"] = shared_scheduler
-    await shared_scheduler.generate_tasks_for_day(date.today())
+    await shared_scheduler.ensure_today_tasks()
 
     await set_commands(bot)
     try:

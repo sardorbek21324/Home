@@ -146,39 +146,68 @@ class BotScheduler:
         )
         log.info("Vote deadline scheduled for instance %s at %s", instance_id, run_date.isoformat())
 
-    async def generate_today_tasks(self) -> None:
-        await self.generate_tasks_for_day(date.today())
+    async def ensure_today_tasks(self) -> int:
+        """Generate tasks for today if they are missing."""
 
-    async def generate_tasks_for_day(self, day: date) -> None:
+        today = date.today()
+        with session_scope() as session:
+            exists = (
+                session.query(TaskInstance)
+                .filter(TaskInstance.day == today)
+                .first()
+            )
+        if exists:
+            log.debug("Tasks for %s already exist, skipping generation", today)
+            return 0
+        created = await self.generate_tasks_for_day(today)
+        log.info("Ensured tasks for %s (created=%s)", today, created)
+        return created
+
+    async def regenerate_today(self) -> int:
+        """Drop today's tasks and regenerate them."""
+
+        today = date.today()
+        with session_scope() as session:
+            removed = (
+                session.query(TaskInstance)
+                .filter(TaskInstance.day == today)
+                .delete(synchronize_session=False)
+            )
+        created = await self.generate_tasks_for_day(today)
+        log.info("Regenerated tasks for %s (removed=%s, created=%s)", today, removed, created)
+        return created
+
+    async def generate_today_tasks(self) -> int:
+        return await self.generate_tasks_for_day(date.today())
+
+    async def generate_tasks_for_day(self, day: date) -> int:
         new_instances: list[int] = []
         with session_scope() as session:
             templates = session.query(TaskTemplate).all()
             for template in templates:
                 if not self._should_generate(template, day):
                     continue
-                slots = template.max_per_day or 1
-                for slot in range(1, slots + 1):
-                    exists = (
-                        session.query(TaskInstance)
-                        .filter(
-                            TaskInstance.template_id == template.id,
-                            TaskInstance.day == day,
-                            TaskInstance.slot == slot,
-                        )
-                        .one_or_none()
+                already_exists = (
+                    session.query(TaskInstance)
+                    .filter(
+                        TaskInstance.template_id == template.id,
+                        TaskInstance.day == day,
                     )
-                    if exists:
-                        continue
-                    instance = create_instance(session, template, day=day, slot=slot)
-                    new_instances.append(instance.id)
-                    log.info(
-                        "Generated instance %s for template %s (%s)",
-                        instance.id,
-                        template.code,
-                        day,
-                    )
+                    .first()
+                )
+                if already_exists:
+                    continue
+                instance = create_instance(session, template, day=day, slot=1)
+                new_instances.append(instance.id)
+                log.info(
+                    "Generated instance %s for template %s (%s)",
+                    instance.id,
+                    template.code,
+                    day,
+                )
         for instance_id in new_instances:
             await self.announce_instance(instance_id, penalize=False)
+        return len(new_instances)
 
     async def announce_instance(self, instance_id: int, penalize: bool, *, note: str | None = None) -> None:
         now = now_tz(settings.TZ)
