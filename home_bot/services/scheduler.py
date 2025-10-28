@@ -13,6 +13,8 @@ from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 
+from sqlalchemy import func
+
 from ..config import settings
 from ..db.models import TaskFrequency, TaskInstance, TaskStatus, TaskTemplate, User, Vote
 from ..db.repo import (
@@ -24,9 +26,8 @@ from ..db.repo import (
     votes_summary,
 )
 from ..domain.constants import CLAIM_REMINDER_MINUTES, VOTE_SECOND_WAIT_MINUTES
-from ..services.ai_controller import AIController
 from ..services.notifications import announce_task, update_verification_messages
-from ..services.scoring import missed_penalty, reward_for_completion
+from ..services.scoring import calc_task_reward, missed_penalty, reward_for_completion
 from ..utils.time import (
     in_quiet_hours,
     next_allowed_moment,
@@ -182,10 +183,9 @@ class BotScheduler:
 
     async def generate_tasks_for_day(self, day: date) -> int:
         new_instances: list[int] = []
-        controller = AIController()
         with session_scope() as session:
-            effective_cache: dict[int, int] = {}
             templates = session.query(TaskTemplate).all()
+            stats = self._collect_scoring_stats(session, [tpl.id for tpl in templates])
             for template in templates:
                 if not self._should_generate(template, day):
                     continue
@@ -199,16 +199,13 @@ class BotScheduler:
                 )
                 if already_exists:
                     continue
-                if template.id not in effective_cache:
-                    effective_cache[template.id] = controller.apply_to_points(
-                        session, template.base_points
-                    )
+                template._scoring_stats = stats.get(template.id, {})
                 instance = create_instance(
                     session,
                     template,
                     day=day,
                     slot=1,
-                    effective_points=effective_cache[template.id],
+                    effective_points=calc_task_reward(template),
                 )
                 new_instances.append(instance.id)
                 log.info(
@@ -217,9 +214,57 @@ class BotScheduler:
                     template.code,
                     day,
                 )
+            for template in templates:
+                if hasattr(template, "_scoring_stats"):
+                    delattr(template, "_scoring_stats")
         for instance_id in new_instances:
             await self.announce_instance(instance_id, penalize=False)
         return len(new_instances)
+
+    def _collect_scoring_stats(
+        self, session, template_ids: list[int]
+    ) -> dict[int, dict[str, object]]:
+        if not template_ids:
+            return {}
+        stats: dict[int, dict[str, object]] = {tid: {} for tid in template_ids}
+        recent_cutoff = datetime.utcnow() - timedelta(days=2)
+        recent_rows = (
+            session.query(TaskInstance.template_id, func.count())
+            .filter(
+                TaskInstance.template_id.in_(template_ids),
+                TaskInstance.status == TaskStatus.approved,
+                TaskInstance.created_at >= recent_cutoff,
+            )
+            .group_by(TaskInstance.template_id)
+            .all()
+        )
+        for template_id, count in recent_rows:
+            stats.setdefault(int(template_id), {})["recent_completions"] = int(count or 0)
+        last_completed_rows = (
+            session.query(TaskInstance.template_id, func.max(TaskInstance.created_at))
+            .filter(
+                TaskInstance.template_id.in_(template_ids),
+                TaskInstance.status == TaskStatus.approved,
+            )
+            .group_by(TaskInstance.template_id)
+            .all()
+        )
+        for template_id, ts in last_completed_rows:
+            if ts:
+                stats.setdefault(int(template_id), {})["last_completed"] = ts
+        oldest_open_rows = (
+            session.query(TaskInstance.template_id, func.min(TaskInstance.created_at))
+            .filter(
+                TaskInstance.template_id.in_(template_ids),
+                TaskInstance.status == TaskStatus.open,
+            )
+            .group_by(TaskInstance.template_id)
+            .all()
+        )
+        for template_id, ts in oldest_open_rows:
+            if ts:
+                stats.setdefault(int(template_id), {})["oldest_open"] = ts
+        return stats
 
     async def announce_instance(self, instance_id: int, penalize: bool, *, note: str | None = None) -> None:
         now = now_tz(settings.TZ)

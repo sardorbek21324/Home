@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import BotCommand
 
 from datetime import date
@@ -70,7 +68,7 @@ async def set_commands(bot: Bot) -> None:
 
 
 async def run_bot() -> None:
-    global bot, dp, scheduler
+    global bot, dp
 
     setup_logging()
     logging.getLogger(__name__).info("Starting bot...")
@@ -106,20 +104,23 @@ async def run_bot() -> None:
     dp["scheduler"] = shared_scheduler
     await shared_scheduler.ensure_today_tasks()
 
+    await bot.delete_webhook(drop_pending_updates=True)
     await set_commands(bot)
+
+    scheduler_jobs = shared_scheduler.scheduler.get_jobs()
+    next_run = None
+    for job in scheduler_jobs:
+        if job.next_run_time and (next_run is None or job.next_run_time < next_run):
+            next_run = job.next_run_time
+    logging.getLogger(__name__).info(
+        "Scheduler info: tz=%s, jobs=%s, next_run=%s",
+        settings.TZ,
+        len(scheduler_jobs),
+        next_run.isoformat() if next_run else "—",
+    )
+
     try:
-        while True:
-            try:
-                await dp.start_polling(bot)
-            except TelegramRetryAfter as exc:
-                delay = exc.retry_after + 1
-                logging.getLogger(__name__).warning("Telegram rate limit. Sleep %s s", delay)
-                await asyncio.sleep(delay)
-            except TelegramNetworkError as exc:
-                logging.getLogger(__name__).warning("Network issue: %s", exc, exc_info=True)
-                await asyncio.sleep(5)
-            else:
-                break
+        await dp.start_polling(bot, polling_timeout=20)
     finally:
         shared_scheduler.shutdown()
         set_lifecycle_controller(None)

@@ -2,7 +2,8 @@ from aiogram import Router, types
 from aiogram.filters import Command
 
 from ..db.repo import ensure_user, session_scope
-from .menu import build_menu_keyboard, render_menu_view
+from ..menu import build_menu_keyboard
+from .menu import render_menu_view
 
 router = Router()
 
@@ -26,4 +27,7 @@ async def start_cmd(message: types.Message) -> None:
         "\n• /tasks — прислать список текстом."
         "\n• /me и /history — быстрый доступ к очкам."
     )
-    await message.answer(text + extra, reply_markup=build_menu_keyboard())
+    await message.answer(
+        text + extra,
+        reply_markup=build_menu_keyboard(message.from_user),
+    )

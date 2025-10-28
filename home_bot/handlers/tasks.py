@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Handlers for task lifecycle: claiming, reporting, cancelling."""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -10,7 +11,10 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
+from sqlalchemy.orm import joinedload
+
 from ..config import settings
+from ..db import SessionLocal
 from ..db.models import TaskInstance, TaskStatus, User
 from ..db.repo import (
     add_score_event,
@@ -28,6 +32,7 @@ from ..services.notifications import (
     update_after_claim,
 )
 from ..services.scheduler import get_lifecycle_controller
+from ..services.scoring import bonus_for_first_taker, penalty_for_skip
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -37,6 +42,19 @@ router = Router()
 log = logging.getLogger(__name__)
 
 
+def _spawn_task(coro):
+    task = asyncio.create_task(coro)
+
+    def _log_failure(future: asyncio.Future) -> None:
+        try:
+            future.result()
+        except Exception:  # pragma: no cover - log only
+            log.exception("Background task failed")
+
+    task.add_done_callback(_log_failure)
+    return task
+
+
 def _get_scheduler() -> "BotScheduler | None":
     return get_lifecycle_controller()
 
@@ -44,37 +62,26 @@ def _get_scheduler() -> "BotScheduler | None":
 def build_tasks_overview() -> str:
     """Return human friendly summary of open/reserved tasks."""
 
-    with session_scope() as session:
+    with SessionLocal() as session:
         rows = (
             session.query(TaskInstance)
+            .options(joinedload(TaskInstance.template))
             .filter(TaskInstance.status.in_([TaskStatus.open, TaskStatus.reserved]))
             .order_by(TaskInstance.created_at.asc())
             .all()
         )
-        instances = [
-            {
-                "title": inst.template.title,
-                "effective_points": inst.effective_points or inst.template.base_points,
-                "status": inst.status,
-                "deferrals": inst.deferrals_used or 0,
-                "attempts": inst.attempts,
-                "progress": inst.progress,
-            }
-            for inst in rows
-        ]
-
-    if not instances:
-        return "🎉 Все задания разобраны. Можно сделать перерыв!"
-
-    lines = ["📋 Доступные задачи сегодня:"]
-    for inst in instances:
-        status = "🟢 свободна" if inst["status"] == TaskStatus.open else "🛠 в работе"
-        lines.append(
-            f"• <b>{inst['title']}</b> (+{inst['effective_points']})\n"
-            f"  {status} | прогресс: {inst['progress']}% | попыток: {inst['attempts']} | переносов: {inst['deferrals']}"
-        )
-    lines.append("\nЖми на кнопку под задачей в чате, чтобы взять её в работу.")
-    return "\n".join(lines)
+        if not rows:
+            return "🎉 Все задания разобраны. Можно сделать перерыв!"
+        lines = ["📋 Доступные задачи сегодня:"]
+        for inst in rows:
+            status = "🟢 свободна" if inst.status == TaskStatus.open else "🛠 в работе"
+            effective_points = inst.effective_points or inst.template.base_points
+            lines.append(
+                f"• <b>{inst.template.title}</b> (+{effective_points})\n"
+                f"  {status} | прогресс: {inst.progress}% | попыток: {inst.attempts} | переносов: {inst.deferrals_used or 0}"
+            )
+        lines.append("\nЖми на кнопку под задачей в чате, чтобы взять её в работу.")
+        return "\n".join(lines)
 
 
 @router.message(Command("tasks"))
@@ -104,6 +111,7 @@ async def claim_task(cb: CallbackQuery) -> None:
         current_deferrals = max(instance.deferrals_used or 0, 0)
         extra_minutes = 0
         target_deferrals = 0
+        was_first = (instance.attempts or 0) == 0 and (instance.deferrals_used or 0) == 0
         if action == "postpone":
             if postpone_level not in (1, 2):
                 await cb.answer("Опция недоступна.", show_alert=True)
@@ -135,6 +143,26 @@ async def claim_task(cb: CallbackQuery) -> None:
         template_title = template.title
         deadline = instance.reserved_until
         deferrals = instance.deferrals_used
+        if action == "postpone":
+            penalty_value = penalty_for_skip(target_deferrals)
+            if penalty_value:
+                add_score_event(
+                    session,
+                    user,
+                    -penalty_value,
+                    "Перенос задачи",
+                    task_instance=instance,
+                )
+        elif action == "claim":
+            bonus = bonus_for_first_taker(was_first)
+            if bonus:
+                add_score_event(
+                    session,
+                    user,
+                    bonus,
+                    "Бонус за первого исполнителя",
+                    task_instance=instance,
+                )
 
     await cb.message.edit_text(
         (
@@ -144,12 +172,14 @@ async def claim_task(cb: CallbackQuery) -> None:
         reply_markup=report_keyboard(instance_id),
     )
     await cb.answer("Удачи! Не забудь отправить отчёт.")
-    await update_after_claim(
-        cb.bot,
-        broadcasts=broadcasts,
-        claimer_user_id=user.id,
-        claimer_name=cb.from_user.full_name,
-        template_title=template_title,
+    _spawn_task(
+        update_after_claim(
+            cb.bot,
+            broadcasts=broadcasts,
+            claimer_user_id=user.id,
+            claimer_name=cb.from_user.full_name,
+            template_title=template_title,
+        )
     )
     lifecycle = _get_scheduler()
     if lifecycle:
@@ -206,7 +236,7 @@ async def cancel_task(cb: CallbackQuery) -> None:
     lifecycle = _get_scheduler()
     if lifecycle:
         lifecycle.cancel_open_jobs(instance_id)
-        await lifecycle.announce_instance(instance_id, penalize=False)
+        _spawn_task(lifecycle.announce_instance(instance_id, penalize=False))
     log.info("Reservation for instance %s cancelled by %s", instance_id, cb.from_user.full_name)
 
 
@@ -294,13 +324,15 @@ async def handle_photo(message: Message) -> None:
 
     await message.answer("Фото получено. Ожидаем голоса семьи!")
 
-    await send_verification_requests(
-        message.bot,
-        task_id=instance_id,
-        template_title=template_title,
-        performer_name=performer_name,
-        photo_file_id=file_id,
-        recipients=recipients,
+    _spawn_task(
+        send_verification_requests(
+            message.bot,
+            task_id=instance_id,
+            template_title=template_title,
+            performer_name=performer_name,
+            photo_file_id=file_id,
+            recipients=recipients,
+        )
     )
 
     lifecycle = _get_scheduler()
