@@ -9,7 +9,8 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from ..config import settings
-from ..services.ai_advisor import AIAdvisor
+from ..db.repo import session_scope
+from ..services.ai_controller import AIController
 from ..services.scheduler import get_scheduler
 
 
@@ -42,8 +43,18 @@ async def selftest(message: Message) -> None:
     except Exception as exc:  # pragma: no cover - network
         tg_status = f"ошибка — {exc.__class__.__name__}"
 
-    advisor = AIAdvisor()
-    ai_status = await advisor.healthcheck()
+    controller = AIController()
+    with session_scope() as session:
+        stats = controller.get_user_stats(session)
+        config = controller.get_config(session)
+        ai_status = controller.healthcheck(session)
+    if stats:
+        stats_lines = "\n".join(
+            f"    {item.name}: coef={item.coefficient:.2f} (взято={item.taken}, пропущено={item.skipped})"
+            for item in stats
+        )
+    else:
+        stats_lines = "    —"
 
     text = textwrap.dedent(
         f"""
@@ -56,6 +67,9 @@ async def selftest(message: Message) -> None:
         {jobs_info}
         Telegram API: {tg_status}
         AI: {ai_status}
+        AI config: penalty={config.penalty_step:.2f}, bonus={config.bonus_step:.2f}, range={config.min_coefficient:.2f}-{config.max_coefficient:.2f}
+        AI stats:
+{stats_lines}
         Если что-то '—' или 'ошибка' — проверь настройки.
         """
     ).strip()

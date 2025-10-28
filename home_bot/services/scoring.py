@@ -9,16 +9,16 @@ from ..domain.constants import (
     SECOND_DEFER_PENALTY,
     MISS_PENALTY_MULTIPLIER,
 )
-from ..db.models import TaskTemplate
+from ..db.models import TaskInstance, TaskTemplate
 
 
-def reward_for_completion(template: TaskTemplate, deferrals_used: int) -> int:
+def reward_for_completion(instance: TaskInstance) -> int:
     penalty_pct = 0.0
-    if deferrals_used >= 1:
+    if instance.deferrals_used >= 1:
         penalty_pct += FIRST_DEFER_PENALTY
-    if deferrals_used >= 2:
+    if instance.deferrals_used >= 2:
         penalty_pct += SECOND_DEFER_PENALTY
-    base = template.base_points
+    base = instance.effective_points or instance.template.base_points
     return max(0, floor(base * (1 - penalty_pct)))
 
 

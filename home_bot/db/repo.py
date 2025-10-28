@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session
 
 from . import Base, SessionLocal, engine
 from .models import (
+    AISettings,
     Dispute,
     DisputeState,
     FamilyMember,
     Report,
     ScoreEvent,
+    TaskBroadcast,
     TaskFrequency,
     TaskInstance,
     TaskKind,
@@ -25,7 +27,6 @@ from .models import (
     User,
     Vote,
     VoteValue,
-    TaskBroadcast,
 )
 from ..config import get_family_user_ids
 
@@ -160,6 +161,7 @@ def create_instance(
     day: date,
     slot: int,
     status: TaskStatus = TaskStatus.open,
+    effective_points: int | None = None,
 ) -> TaskInstance:
     now = datetime.now(timezone.utc)
     next_check_at = None
@@ -170,6 +172,7 @@ def create_instance(
         day=day,
         slot=slot,
         status=status,
+        effective_points=effective_points if effective_points is not None else template.base_points,
         created_at=now,
         round_no=0,
         next_check_at=next_check_at,
@@ -217,6 +220,7 @@ def reserve_instance(
     deadline_minutes = instance.template.sla_minutes + extra_minutes
     instance.reserved_until = now + timedelta(minutes=deadline_minutes)
     instance.attempts += 1
+    instance.progress = 50
     session.flush()
     return instance.reserved_until
 
@@ -256,12 +260,22 @@ def try_claim_task(
             reserved_until=reserved_until,
             deferrals_used=deferrals_used,
             attempts=TaskInstance.attempts + 1,
+            progress=50,
             round_no=0,
         )
         .returning(TaskInstance.id)
     )
     result = session.execute(stmt).scalar_one_or_none()
     return result is not None
+
+
+def ensure_ai_settings(session: Session) -> AISettings:
+    settings_row = session.get(AISettings, 1)
+    if settings_row is None:
+        settings_row = AISettings(id=1)
+        session.add(settings_row)
+        session.flush()
+    return settings_row
 
 
 def votes_summary(session: Session, instance: TaskInstance) -> tuple[int, int]:
@@ -324,7 +338,16 @@ def resolve_dispute(session: Session, dispute: Dispute, resolved_by: User, note:
     dispute.resolved_at = datetime.utcnow()
     dispute.note = note
     instance = dispute.task_instance
-    instance.status = TaskStatus.approved if approve else TaskStatus.rejected
+    if approve:
+        instance.status = TaskStatus.approved
+        instance.progress = 100
+    else:
+        instance.status = TaskStatus.reserved
+        instance.progress = 50
+        instance.attempts += 1
+        if instance.report:
+            session.delete(instance.report)
+            instance.report = None
     session.flush()
 
 

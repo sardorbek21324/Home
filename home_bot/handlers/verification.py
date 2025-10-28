@@ -12,7 +12,6 @@ from ..db.models import TaskInstance, TaskStatus, User, Vote, VoteValue
 from ..db.repo import (
     add_score_event,
     family_users,
-    open_dispute,
     pop_task_broadcasts,
     register_vote,
     session_scope,
@@ -91,7 +90,7 @@ async def handle_vote(cb: CallbackQuery) -> None:
 
         if expected_votes and total_votes >= expected_votes and performer:
             if yes > no:
-                reward = reward_for_completion(instance.template, instance.deferrals_used)
+                reward = reward_for_completion(instance)
                 add_score_event(
                     session,
                     performer,
@@ -100,21 +99,22 @@ async def handle_vote(cb: CallbackQuery) -> None:
                     task_instance=instance,
                 )
                 instance.status = TaskStatus.approved
+                instance.progress = 100
                 feedback = f"✅ {template_title} подтверждено. +{reward} баллов."
                 verdict_text = "Отчёт принят ✅"
                 decision = "approved"
             else:
-                instance.status = TaskStatus.rejected
-                if voter:
-                    open_dispute(
-                        session,
-                        instance,
-                        voter,
-                        note="Отклонено голосованием",
-                    )
-                feedback = f"❌ {template_title} отклонено."
+                session.query(Vote).filter(Vote.task_instance_id == instance.id).delete(synchronize_session=False)
+                instance.attempts += 1
+                instance.status = TaskStatus.reserved
+                instance.progress = 50
+                instance.round_no = 0
+                if instance.report:
+                    session.delete(instance.report)
+                    instance.report = None
+                feedback = f"❌ {template_title} отклонено. Попробуй ещё раз!"
                 verdict_text = "Отчёт отклонён ❌"
-                decision = "rejected"
+                decision = "retry"
             broadcasts = pop_task_broadcasts(session, instance.id)
         else:
             feedback = "Голос принят. Ждём остальных."

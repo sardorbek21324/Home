@@ -184,7 +184,7 @@ async def resolve_dispute_cmd(message: Message) -> None:
         instance = dispute.task_instance
         performer = session.get(User, instance.assigned_to) if instance.assigned_to else None
         if approve and performer:
-            reward = reward_for_completion(instance.template, instance.deferrals_used)
+            reward = reward_for_completion(instance)
             add_score_event(
                 session,
                 performer,

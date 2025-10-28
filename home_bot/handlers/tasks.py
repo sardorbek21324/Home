@@ -54,10 +54,11 @@ def build_tasks_overview() -> str:
         instances = [
             {
                 "title": inst.template.title,
-                "base_points": inst.template.base_points,
+                "effective_points": inst.effective_points or inst.template.base_points,
                 "status": inst.status,
                 "deferrals": inst.deferrals_used or 0,
                 "attempts": inst.attempts,
+                "progress": inst.progress,
             }
             for inst in rows
         ]
@@ -68,11 +69,9 @@ def build_tasks_overview() -> str:
     lines = ["📋 Доступные задачи сегодня:"]
     for inst in instances:
         status = "🟢 свободна" if inst["status"] == TaskStatus.open else "🛠 в работе"
-        defer = inst["deferrals"]
-        bar = "▓" * max(1, 5 - defer) + "░" * defer
         lines.append(
-            f"• <b>{inst['title']}</b> (+{inst['base_points']})\n"
-            f"  {status} | попыток: {inst['attempts']} | прогресс: {bar}"
+            f"• <b>{inst['title']}</b> (+{inst['effective_points']})\n"
+            f"  {status} | прогресс: {inst['progress']}% | попыток: {inst['attempts']} | переносов: {inst['deferrals']}"
         )
     lines.append("\nЖми на кнопку под задачей в чате, чтобы взять её в работу.")
     return "\n".join(lines)
@@ -199,6 +198,7 @@ async def cancel_task(cb: CallbackQuery) -> None:
         instance.assigned_to = None
         instance.reserved_until = None
         instance.deferrals_used = 0
+        instance.progress = 0
         session.flush()
 
     await cb.message.edit_text("Бронь снята. Задача снова доступна всем.")
@@ -259,7 +259,7 @@ async def handle_photo(message: Message) -> None:
             await message.answer("Нет задач, ожидающих фото.")
             return
         file_id = message.photo[-1].file_id
-        submit_report(session, instance, user, file_id)
+        report = submit_report(session, instance, user, file_id)
         template_title = instance.template.title
         instance_id = instance.id
         configured_family = list(settings.FAMILY_IDS)
@@ -276,11 +276,17 @@ async def handle_photo(message: Message) -> None:
         elif instance.round_no == 0:
             auto_reject = True
         if auto_reject:
-            instance.status = TaskStatus.rejected
+            instance.attempts += 1
+            instance.status = TaskStatus.reserved
+            instance.progress = 50
+            instance.round_no = 0
+            if report:
+                session.delete(report)
+                instance.report = None
         session.flush()
 
     if auto_reject:
-        await message.answer(rejection_text)
+        await message.answer(rejection_text + " Задача остаётся в работе.")
         log.info(
             "Report auto-rejected for instance %s: no reviewers", instance_id
         )

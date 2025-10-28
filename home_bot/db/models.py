@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -108,7 +109,9 @@ class TaskInstance(Base):
     assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     reserved_until: Mapped[datetime | None] = mapped_column(DateTime)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    progress: Mapped[int] = mapped_column(Integer, default=0)
     deferrals_used: Mapped[int] = mapped_column(Integer, default=0)
+    effective_points: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_announce_at: Mapped[datetime | None] = mapped_column(DateTime)
     round_no: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -186,5 +189,16 @@ class TaskBroadcast(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     chat_id: Mapped[int] = mapped_column(Integer)
     message_id: Mapped[int] = mapped_column(Integer)
+
+
+class AISettings(Base):
+    __tablename__ = "ai_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    penalty_step: Mapped[float] = mapped_column(Float, default=0.05)
+    bonus_step: Mapped[float] = mapped_column(Float, default=0.03)
+    min_coefficient: Mapped[float] = mapped_column(Float, default=0.8)
+    max_coefficient: Mapped[float] = mapped_column(Float, default=1.5)
+    default_coefficient: Mapped[float] = mapped_column(Float, default=1.0)
 
 
