@@ -10,7 +10,7 @@ A household management bot built with **aiogram 3**, **SQLAlchemy 2**, and **APS
 - ♻️ Re-announcements every ~2 hours until a task is taken, observing quiet hours.
 - 🧾 Score ledger with `/balance`, `/history`, `/rating`, and monthly reset flow.
 - ⚖️ Dispute tracking with `/disputes` and `/resolve_dispute` admin actions.
-- 🤖 Optional OpenAI helper for wording tips (disabled when `OPENAI_API_KEY` is not provided).
+- 🤖 AI-контроллер, который динамически корректирует вознаграждения в зависимости от истории задач.
 - 🛠 Admin commands for manual announcements, template seeding, dispute resolution, and season resets.
 
 ## Environment & Configuration
@@ -26,7 +26,6 @@ A household management bot built with **aiogram 3**, **SQLAlchemy 2**, and **APS
 | `ADMIN_IDS` | Admin Telegram user IDs (int / CSV / JSON). |
 | `TZ` | IANA timezone (default `Europe/Warsaw`). |
 | `QUIET_HOURS` | Quiet window like `23:00-08:00`. |
-| `OPENAI_API_KEY` | Optional; leave empty to disable AI helper. |
 | `DATABASE_URL` | Optional; defaults to `sqlite:///data.db`. |
 
 Additional optional variable: `TZ` defaults to `Europe/Warsaw`, matching the specification.
@@ -41,10 +40,13 @@ Additional optional variable: `TZ` defaults to `Europe/Warsaw`, matching the spe
 - `/history` — last 20 score events.
 - `/help` — summary of commands.
 
-Reply keyboard layout (`/menu`):
+Inline menu (`/menu`):
 ```
-📊 Баланс    📅 История
-🧹 Задачи    🛠 Админ (admins only)
+📋 Задания
+🏆 Баланс
+📜 История
+ℹ️ Помощь
+⚙️ AI Настройки (только для админов)
 ```
 
 ### Admin commands
@@ -52,6 +54,8 @@ Reply keyboard layout (`/menu`):
 - `/add_task code;Title;points;frequency;max_per_day;sla;claim_timeout;kind;penalty` — add a template.
 - `/disputes` — list unresolved disputes.
 - `/resolve_dispute <id> <approve|reject> <note>` — close a dispute and optionally grant reward.
+- `/ai_stats` — show adaptive reward coefficients per user.
+- `/ai_config penalty=0.05 bonus=0.02` — tweak AI reward parameters.
 - `/end_month` — announce winner and reset seasonal scores.
 
 ## Behaviour Overview
@@ -79,8 +83,10 @@ The `Makefile` includes a `run` target for convenience. Database tables and defa
    - Configure environment variables as described above.
 3. SQLite is stored in the working directory; for production use, supply a managed Postgres connection string via `DATABASE_URL`.
 
-## OpenAI Helper (Optional)
-The AI advisor lives in `home_bot/services/ai_advisor.py`. If `OPENAI_API_KEY` is unset or empty, the helper gracefully disables itself. When enabled, it can suggest motivational copy and balance tweaks without touching the scoring rules.
+## AI Reward Controller
+The adaptive reward engine lives in `home_bot/services/ai_controller.py`. It analyses how many tasks each family member завершил или пропустил и вычисляет коэффициент вознаграждения. При генерации задач база (`base_points`) умножается на средний коэффициент, а результат сохраняется как `effective_points`. Команды `/ai_stats` и `/ai_config` позволяют администраторам просматривать историю и настраивать параметры (`penalty_step`, `bonus_step`, минимальный/максимальный коэффициенты и значение по умолчанию).
+
+При отклонении отчёта счётчик `attempts` увеличивается, задача остаётся в статусе "в работе" с прогрессом 50 %, а после подтверждения прогресс фиксируется на 100 %. Обзор задач показывает текущий прогресс, количество попыток и актуальные баллы.
 
 ## Acceptance Checklist
 - `/start` shows the onboarding guide and keyboard.
@@ -90,5 +96,6 @@ The AI advisor lives in `home_bot/services/ai_advisor.py`. If `OPENAI_API_KEY` i
 - Single vote verdicts auto-finalise after 15 minutes.
 - `/rating` and `/history` reflect live data.
 - `/end_month` announces the season winner and resets balances.
+- `/ai_stats` and `/ai_config` expose and tweak adaptive reward settings.
 
 Happy housekeeping! 🧼

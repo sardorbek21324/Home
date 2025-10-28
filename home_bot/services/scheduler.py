@@ -19,12 +19,12 @@ from ..db.repo import (
     add_score_event,
     create_instance,
     family_users,
-    open_dispute,
     pop_task_broadcasts,
     session_scope,
     votes_summary,
 )
 from ..domain.constants import CLAIM_REMINDER_MINUTES, VOTE_SECOND_WAIT_MINUTES
+from ..services.ai_controller import AIController
 from ..services.notifications import announce_task, update_verification_messages
 from ..services.scoring import missed_penalty, reward_for_completion
 from ..utils.time import (
@@ -182,7 +182,9 @@ class BotScheduler:
 
     async def generate_tasks_for_day(self, day: date) -> int:
         new_instances: list[int] = []
+        controller = AIController()
         with session_scope() as session:
+            effective_cache: dict[int, int] = {}
             templates = session.query(TaskTemplate).all()
             for template in templates:
                 if not self._should_generate(template, day):
@@ -197,7 +199,17 @@ class BotScheduler:
                 )
                 if already_exists:
                     continue
-                instance = create_instance(session, template, day=day, slot=1)
+                if template.id not in effective_cache:
+                    effective_cache[template.id] = controller.apply_to_points(
+                        session, template.base_points
+                    )
+                instance = create_instance(
+                    session,
+                    template,
+                    day=day,
+                    slot=1,
+                    effective_points=effective_cache[template.id],
+                )
                 new_instances.append(instance.id)
                 log.info(
                     "Generated instance %s for template %s (%s)",
@@ -253,7 +265,7 @@ class BotScheduler:
                 return
             template = instance.template
             template_title = template.title
-            base_points = template.base_points
+            base_points = instance.effective_points or template.base_points
             claim_timeout = template.claim_timeout_minutes
             penalty_value = template.nobody_claimed_penalty if penalize else 0
             family = [user for user in family_users(session) if user.tg_id]
@@ -395,6 +407,7 @@ class BotScheduler:
                 inst.last_announce_at = None
                 inst.created_at = datetime.utcnow()
                 inst.round_no = 0
+                inst.progress = 0
                 reopen_ids.append(inst.id)
         for tg_id, text in notifications:
             try:
@@ -464,7 +477,7 @@ class BotScheduler:
             missing = max(expected_votes - (yes + no), 0)
             effective_no = no + missing
             if yes > effective_no:
-                reward = reward_for_completion(instance.template, instance.deferrals_used)
+                reward = reward_for_completion(instance)
                 if performer:
                     add_score_event(
                         session,
@@ -474,13 +487,19 @@ class BotScheduler:
                         task_instance=instance,
                     )
                 instance.status = TaskStatus.approved
+                instance.progress = 100
                 message = f"✅ {template_title} подтверждено. +{reward} баллов."
                 verdict_text = "Отчёт принят ✅"
             else:
-                instance.status = TaskStatus.rejected
-                if performer and expected_votes:
-                    open_dispute(session, instance, performer, note="Автоотклонение по голосованию")
-                message = f"❌ {template_title} отклонено."
+                session.query(Vote).filter(Vote.task_instance_id == instance.id).delete(synchronize_session=False)
+                instance.attempts += 1
+                instance.status = TaskStatus.reserved
+                instance.progress = 50
+                instance.round_no = 0
+                if instance.report:
+                    session.delete(instance.report)
+                    instance.report = None
+                message = f"❌ {template_title} отклонено. Попробуй ещё раз!"
                 verdict_text = "Отчёт отклонён ❌"
             broadcasts = list(pop_task_broadcasts(session, instance.id))
         self.cancel_vote_deadline(instance_id)

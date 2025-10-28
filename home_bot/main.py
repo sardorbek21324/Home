@@ -17,6 +17,7 @@ from .config import settings
 from .db.repo import init_db, seed_templates, session_scope
 from .handlers import (
     admin,
+    ai_admin,
     ai_test,
     common,
     diagnostics,
@@ -51,7 +52,9 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="history", description="История операций"),
         BotCommand(command="myid", description="Мой Telegram ID"),
         BotCommand(command="selftest", description="Самодиагностика"),
-        BotCommand(command="ai_test", description="Проверка OpenAI"),
+        BotCommand(command="ai_test", description="Проверка AI-контроллера"),
+        BotCommand(command="ai_stats", description="Админ: статистика AI"),
+        BotCommand(command="ai_config", description="Админ: параметры AI"),
         BotCommand(command="family_list", description="Админ: список family IDs"),
         BotCommand(command="family_add", description="Админ: добавить family ID"),
         BotCommand(command="family_remove", description="Админ: удалить family ID"),
@@ -87,6 +90,7 @@ async def run_bot() -> None:
     dp.include_router(menu.router)
     dp.include_router(common.router)
     dp.include_router(ai_test.router)
+    dp.include_router(ai_admin.router)
     dp.include_router(score.router)
     dp.include_router(tasks.router)
     dp.include_router(verification.router)
