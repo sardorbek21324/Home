@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import date, datetime, timedelta
@@ -28,6 +29,7 @@ from ..db.repo import (
 from ..domain.constants import CLAIM_REMINDER_MINUTES, VOTE_SECOND_WAIT_MINUTES
 from ..services.notifications import announce_task, update_verification_messages
 from ..services.scoring import calc_task_reward, missed_penalty, reward_for_completion
+from ..utils.telegram import safe_send_message
 from ..utils.time import (
     in_quiet_hours,
     next_allowed_moment,
@@ -96,8 +98,13 @@ COMMON_JOB_OPTIONS = {
 }
 
 
+PENDING_QUEUE_JOB_ID = "announce_pending_queue"
+
+
 class BotScheduler:
     """High level orchestrator for timed events."""
+
+    MAX_ACTIVE_TASKS = 3
 
     def __init__(self, bot=None, scheduler: AsyncIOScheduler | None = None) -> None:
         self.bot = bot
@@ -147,6 +154,76 @@ class BotScheduler:
         )
         log.info("Vote deadline scheduled for instance %s at %s", instance_id, run_date.isoformat())
 
+    def _schedule_pending_after_quiet(self, now_local: datetime) -> None:
+        run_at = next_allowed_moment(now_local, self.quiet_hours)
+        trigger = DateTrigger(run_date=run_at)
+        self.scheduler.add_job(
+            self.announce_pending_tasks,
+            trigger=trigger,
+            id=PENDING_QUEUE_JOB_ID,
+            **COMMON_JOB_OPTIONS,
+        )
+        log.info("Delayed pending announcements until %s", run_at.isoformat())
+
+    async def announce_pending_tasks(self) -> None:
+        if self.bot is None:
+            return
+        now_local = now_tz(settings.TZ)
+        if in_quiet_hours(now_local, self.quiet_hours):
+            self._schedule_pending_after_quiet(now_local)
+            return
+        self._remove_job(PENDING_QUEUE_JOB_ID)
+        while True:
+            with session_scope() as session:
+                today = date.today()
+                active_count = (
+                    session.query(TaskInstance)
+                    .filter(
+                        TaskInstance.day <= today,
+                        TaskInstance.status == TaskStatus.open,
+                        TaskInstance.announced.is_(True),
+                    )
+                    .count()
+                )
+                if active_count >= self.MAX_ACTIVE_TASKS:
+                    break
+                next_instance = (
+                    session.query(TaskInstance)
+                    .filter(
+                        TaskInstance.day <= today,
+                        TaskInstance.status == TaskStatus.open,
+                        TaskInstance.announced.is_(False),
+                    )
+                    .order_by(TaskInstance.day.asc(), TaskInstance.created_at.asc())
+                    .first()
+                )
+                if not next_instance:
+                    break
+                instance_id = next_instance.id
+                penalize = next_instance.announcement_penalize
+                note = next_instance.announcement_note
+                next_instance.announced = True
+                next_instance.announcement_penalize = False
+                next_instance.announcement_note = None
+                session.flush()
+            await asyncio.sleep(1)
+            sent = await self._deliver_announcement(
+                instance_id,
+                penalize=penalize,
+                note=note,
+            )
+            if not sent:
+                with session_scope() as session:
+                    instance = session.get(TaskInstance, instance_id)
+                    if instance and instance.status == TaskStatus.open:
+                        instance.announced = False
+                        instance.announcement_penalize = penalize
+                        instance.announcement_note = note
+                break
+
+    async def on_task_claimed(self, instance_id: int | None = None) -> None:
+        await self.announce_pending_tasks()
+
     async def ensure_today_tasks(self) -> int:
         """Generate tasks for today if they are missing."""
 
@@ -159,6 +236,7 @@ class BotScheduler:
             )
         if exists:
             log.debug("Tasks for %s already exist, skipping generation", today)
+            await self.announce_pending_tasks()
             return 0
         created = await self.generate_tasks_for_day(today)
         log.info("Ensured tasks for %s (created=%s)", today, created)
@@ -267,38 +345,42 @@ class BotScheduler:
         return stats
 
     async def announce_instance(self, instance_id: int, penalize: bool, *, note: str | None = None) -> None:
-        now = now_tz(settings.TZ)
-        if in_quiet_hours(now, self.quiet_hours):
-            run_at = next_allowed_moment(now, self.quiet_hours)
-            trigger = DateTrigger(run_date=run_at)
-            self.scheduler.add_job(
-                self.announce_instance,
-                trigger=trigger,
-                args=[instance_id, penalize],
-                kwargs={"note": note},
-                id=self._job_id("announce", instance_id),
-                **COMMON_JOB_OPTIONS,
-            )
-            log.info(
-                "Delayed announcement for instance %s to %s because of quiet hours",
-                instance_id,
-                run_at.isoformat(),
-            )
-            return
+        with session_scope() as session:
+            instance = session.get(TaskInstance, instance_id)
+            if not instance:
+                return
+            if instance.status != TaskStatus.open:
+                return
+            instance.announcement_penalize = penalize
+            instance.announcement_note = note
+            instance.announced = False
+            instance.last_announce_at = None
+            session.flush()
+        await self.announce_pending_tasks()
 
-        await self._deliver_announcement(instance_id, penalize=penalize, note=note)
-
-    async def _deliver_announcement(self, instance_id: int, *, penalize: bool, note: str | None) -> None:
+    async def _deliver_announcement(
+        self,
+        instance_id: int,
+        *,
+        penalize: bool | None = None,
+        note: str | None,
+    ) -> bool:
+        if self.bot is None:
+            return False
         if not settings.FAMILY_IDS:
             log.info("No family members to notify.")
-            return
+            return True
         recipients: list[tuple[int, int]] = []
         allow_first = True
         allow_second = True
         with session_scope() as session:
             instance = session.get(TaskInstance, instance_id)
             if not instance or instance.status != TaskStatus.open:
-                return
+                return False
+            if penalize is None:
+                penalize = instance.announcement_penalize
+            if note is None:
+                note = instance.announcement_note
             now = datetime.utcnow()
             cutoff = timedelta(minutes=settings.ANNOUNCE_CUTOFF_MINUTES)
             if instance.round_no == 0 and now - instance.created_at > cutoff:
@@ -307,7 +389,7 @@ class BotScheduler:
                     instance_id,
                     (now - instance.created_at),
                 )
-                return
+                return True
             template = instance.template
             template_title = template.title
             base_points = instance.effective_points or template.base_points
@@ -355,8 +437,10 @@ class BotScheduler:
             )
         except Exception as exc:
             log.warning("Failed to announce task %s: %s", instance_id, exc)
+            return False
         self.schedule_claim_deadline(instance_id, claim_timeout)
         log.info("Announcement sent for instance %s", instance_id)
+        return True
 
     def schedule_claim_deadline(self, instance_id: int, claim_timeout: int) -> None:
         run_date = datetime.utcnow() + timedelta(minutes=claim_timeout)
@@ -393,6 +477,7 @@ class BotScheduler:
             instance.last_announce_at = None
             instance.round_no = 0
             instance.created_at = datetime.utcnow()
+            instance.announced = False
             session.flush()
         log.info("Claim timeout reached for instance %s", instance_id)
         self.schedule_reannounce(instance_id, note=note)
@@ -453,12 +538,13 @@ class BotScheduler:
                 inst.created_at = datetime.utcnow()
                 inst.round_no = 0
                 inst.progress = 0
+                inst.announced = False
+                inst.announcement_note = None
+                inst.announcement_penalize = False
                 reopen_ids.append(inst.id)
         for tg_id, text in notifications:
-            try:
-                await self.bot.send_message(tg_id, text)
-            except Exception as exc:
-                log.warning("Failed to notify missed deadline to %s: %s", tg_id, exc)
+            if self.bot:
+                await safe_send_message(self.bot, tg_id, text)
         for instance_id in reopen_ids:
             await self.announce_instance(instance_id, penalize=False)
             log.info("Reopened missed instance %s", instance_id)
@@ -555,11 +641,8 @@ class BotScheduler:
             no,
             "approved" if message and message.startswith("✅") else "rejected",
         )
-        if performer_tg_id and message:
-            try:
-                await self.bot.send_message(performer_tg_id, message)
-            except Exception as exc:
-                log.warning("Failed to send vote result to %s: %s", performer_tg_id, exc)
+        if performer_tg_id and message and self.bot:
+            await safe_send_message(self.bot, performer_tg_id, message)
         if broadcasts and message:
             await update_verification_messages(
                 self.bot,
@@ -568,6 +651,7 @@ class BotScheduler:
                 performer_name=performer_name,
                 verdict_text=verdict_text,
             )
+        await self.announce_pending_tasks()
 
     def _should_generate(self, template: TaskTemplate, day: date) -> bool:
         if template.frequency == TaskFrequency.daily:
@@ -576,6 +660,8 @@ class BotScheduler:
             return day.weekday() == 0
         if template.frequency == TaskFrequency.every_2days:
             return day.toordinal() % 2 == 0
+        if template.frequency == TaskFrequency.monthly:
+            return day.day == 1
         return False
 
 

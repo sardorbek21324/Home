@@ -1,6 +1,8 @@
 from aiogram import Router, types
 from aiogram.filters import Command
 
+from ..utils.telegram import answer_safe
+
 router = Router()
 
 
@@ -8,4 +10,4 @@ router = Router()
 async def myid(message: types.Message):
     uid = message.from_user.id
     name = (message.from_user.full_name or "").strip()
-    await message.answer(f"Твой Telegram ID: <code>{uid}</code>\n{name}")
+    await answer_safe(message, f"Твой Telegram ID: <code>{uid}</code>\n{name}")

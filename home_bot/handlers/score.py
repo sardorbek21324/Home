@@ -10,6 +10,7 @@ from aiogram.types import Message
 
 from ..db.models import ScoreEvent, User
 from ..db.repo import list_users, session_scope
+from ..utils.telegram import answer_safe
 
 
 router = Router()
@@ -63,24 +64,24 @@ async def show_rating(message: Message) -> None:
     with session_scope() as session:
         entries = [(user.username or user.name or str(user.tg_id), user.score) for user in list_users(session)]
     if not entries:
-        await message.answer("Пока нет участников.")
+        await answer_safe(message, "Пока нет участников.")
         return
 
     lines = ["🏆 Таблица лидеров"]
     for index, (name, score_value) in enumerate(sorted(entries, key=lambda item: item[1], reverse=True), start=1):
         lines.append(f"{index}. {name} — {score_value} баллов")
-    await message.answer("\n".join(lines))
+    await answer_safe(message, "\n".join(lines))
 
 
 @router.message(Command("balance", "me"))
 async def show_balance(message: Message) -> None:
     if message.from_user is None:
         return
-    await message.answer(build_balance_text(message.from_user.id))
+    await answer_safe(message, build_balance_text(message.from_user.id))
 
 
 @router.message(Command("history"))
 async def history(message: Message) -> None:
     if message.from_user is None:
         return
-    await message.answer(build_history_text(message.from_user.id))
+    await answer_safe(message, build_history_text(message.from_user.id))
