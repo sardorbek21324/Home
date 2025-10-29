@@ -224,7 +224,7 @@ class BotScheduler:
     async def on_task_claimed(self, instance_id: int | None = None) -> None:
         await self.announce_pending_tasks()
 
-    async def ensure_today_tasks(self) -> int:
+    async def ensure_today_tasks(self, *, announce: bool = True) -> int:
         """Generate tasks for today if they are missing."""
 
         today = date.today()
@@ -236,9 +236,10 @@ class BotScheduler:
             )
         if exists:
             log.debug("Tasks for %s already exist, skipping generation", today)
-            await self.announce_pending_tasks()
+            if announce:
+                await self.announce_pending_tasks()
             return 0
-        created = await self.generate_tasks_for_day(today)
+        created = await self.generate_tasks_for_day(today, announce=announce)
         log.info("Ensured tasks for %s (created=%s)", today, created)
         return created
 
@@ -259,7 +260,7 @@ class BotScheduler:
     async def generate_today_tasks(self) -> int:
         return await self.generate_tasks_for_day(date.today())
 
-    async def generate_tasks_for_day(self, day: date) -> int:
+    async def generate_tasks_for_day(self, day: date, *, announce: bool = True) -> int:
         new_instances: list[int] = []
         with session_scope() as session:
             templates = session.query(TaskTemplate).all()
@@ -295,8 +296,9 @@ class BotScheduler:
             for template in templates:
                 if hasattr(template, "_scoring_stats"):
                     delattr(template, "_scoring_stats")
-        for instance_id in new_instances:
-            await self.announce_instance(instance_id, penalize=False)
+        if announce:
+            for instance_id in new_instances:
+                await self.announce_instance(instance_id, penalize=False)
         return len(new_instances)
 
     def _collect_scoring_stats(
