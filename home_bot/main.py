@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date
 
-from aiohttp import ClientTimeout
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.types import BotCommand
 
 from .config import settings
@@ -79,8 +78,7 @@ async def run_bot() -> None:
     with session_scope() as session:
         seed_templates(session, load_seed_templates())
 
-    timeout = ClientTimeout(total=20)
-    session = AiohttpSession(timeout=timeout)
+    session = AiohttpSession(timeout=15)
     bot = Bot(
         token=settings.BOT_TOKEN,
         session=session,
@@ -107,9 +105,17 @@ async def run_bot() -> None:
     set_lifecycle_controller(shared_scheduler)
     shared_scheduler.start()
     dp["scheduler"] = shared_scheduler
-    await shared_scheduler.ensure_today_tasks()
+    await shared_scheduler.ensure_today_tasks(announce=False)
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(
+            drop_pending_updates=True,
+            request_timeout=10,
+        )
+    except TelegramNetworkError:
+        logging.getLogger(__name__).warning(
+            "delete_webhook timeout — продолжаю без ошибки"
+        )
     await set_commands(bot)
 
     scheduler_jobs = shared_scheduler.scheduler.get_jobs()
@@ -125,7 +131,7 @@ async def run_bot() -> None:
     )
 
     try:
-        await dp.start_polling(bot, polling_timeout=20)
+        await dp.start_polling(bot)
     finally:
         shared_scheduler.shutdown()
         set_lifecycle_controller(None)
