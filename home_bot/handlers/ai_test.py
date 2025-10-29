@@ -2,6 +2,7 @@ from aiogram import Router, types
 from aiogram.filters import Command
 
 from ..services.ai_controller import AIController
+from ..utils.telegram import answer_safe
 
 router = Router()
 
@@ -10,4 +11,4 @@ router = Router()
 async def ai_test(message: types.Message):
     controller = AIController()
     status = controller.healthcheck()
-    await message.answer(f"AI controller: {status}")
+    await answer_safe(message, f"AI controller: {status}")

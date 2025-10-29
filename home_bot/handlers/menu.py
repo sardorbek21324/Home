@@ -8,6 +8,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from ..config import settings
 from ..menu import build_menu_keyboard
+from ..utils.telegram import answer_safe
 from . import score, tasks
 
 router = Router()
@@ -66,7 +67,8 @@ async def render_menu_view(action: str, user: types.User | None) -> str:
 
 @router.message(Command("menu"))
 async def show_menu(message: types.Message) -> None:
-    await message.answer(
+    await answer_safe(
+        message,
         await render_menu_view("home", message.from_user),
         reply_markup=build_inline_menu_keyboard(message.from_user),
     )
@@ -89,13 +91,13 @@ async def show_balance_shortcut(message: types.Message) -> None:
     if message.from_user is None:
         return
     text = await render_menu_view("score", message.from_user)
-    await message.answer(text, reply_markup=build_menu_keyboard(message.from_user))
+    await answer_safe(message, text, reply_markup=build_menu_keyboard(message.from_user))
 
 
 @router.message(F.text == "📝 Задачи")
 async def show_tasks_shortcut(message: types.Message) -> None:
     text = await render_menu_view("tasks", message.from_user)
-    await message.answer(text, reply_markup=build_menu_keyboard(message.from_user))
+    await answer_safe(message, text, reply_markup=build_menu_keyboard(message.from_user))
 
 
 @router.message(F.text == "📅 История")
@@ -103,13 +105,13 @@ async def show_history_shortcut(message: types.Message) -> None:
     if message.from_user is None:
         return
     text = await render_menu_view("history", message.from_user)
-    await message.answer(text, reply_markup=build_menu_keyboard(message.from_user))
+    await answer_safe(message, text, reply_markup=build_menu_keyboard(message.from_user))
 
 
 @router.message(F.text == "🛠 Админ")
 async def show_admin_shortcut(message: types.Message) -> None:
     if message.from_user is None or message.from_user.id not in settings.ADMIN_IDS:
-        await message.answer("Раздел доступен только администраторам.")
+        await answer_safe(message, "Раздел доступен только администраторам.")
         return
     text = await render_menu_view("help", message.from_user)
-    await message.answer(text, reply_markup=build_menu_keyboard(message.from_user))
+    await answer_safe(message, text, reply_markup=build_menu_keyboard(message.from_user))

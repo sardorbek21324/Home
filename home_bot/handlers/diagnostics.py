@@ -14,6 +14,7 @@ from ..db.repo import session_scope
 from ..services.ai_controller import AIController
 from ..services.scheduler import get_scheduler
 from sqlalchemy import select
+from ..utils.telegram import answer_safe
 
 
 def _is_admin(user_id: int | None) -> bool:
@@ -84,21 +85,21 @@ async def selftest(message: Message) -> None:
         """
     ).strip()
 
-    await message.answer(text)
+    await answer_safe(message, text)
 
 
 @router.message(Command("debug_jobs"))
 async def debug_jobs(message: Message) -> None:
     if not _is_admin(message.from_user and message.from_user.id):
-        await message.answer("Команда доступна только администраторам.")
+        await answer_safe(message, "Команда доступна только администраторам.")
         return
     scheduler = get_scheduler()
     jobs = scheduler.get_jobs()
     if not jobs:
-        await message.answer("Планировщик активен, но задач нет.")
+        await answer_safe(message, "Планировщик активен, но задач нет.")
         return
     lines = ["🛠 Активные задания планировщика:"]
     for job in jobs:
         next_run = job.next_run_time.isoformat() if job.next_run_time else "—"
         lines.append(f"• <code>{job.id}</code> → {next_run}")
-    await message.answer("\n".join(lines))
+    await answer_safe(message, "\n".join(lines))

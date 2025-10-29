@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..db.repo import BroadcastRecord, add_task_broadcasts, session_scope
+from ..utils.telegram import safe_send_message, safe_send_photo
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ async def announce_task(
     recipients: Sequence[tuple[int, int]],
     allow_first_postpone: bool,
     allow_second_postpone: bool,
-) -> None:
+) -> bool:
     """Send task announce to all recipients and remember message ids."""
 
     keyboard = _task_keyboard(
@@ -67,10 +68,8 @@ async def announce_task(
     )
     delivered: list[BroadcastRecord] = []
     for user_id, chat_id in recipients:
-        try:
-            message = await bot.send_message(chat_id, text, reply_markup=keyboard)
-        except Exception as exc:  # pragma: no cover - network
-            log.warning("Failed to announce task %s to %s: %s", task_id, chat_id, exc)
+        message = await safe_send_message(bot, chat_id, text, reply_markup=keyboard)
+        if message is None:
             continue
         delivered.append(
             BroadcastRecord(
@@ -88,6 +87,7 @@ async def announce_task(
         task_id,
         len(delivered),
     )
+    return bool(delivered)
 
 
 async def update_after_claim(
@@ -150,20 +150,14 @@ async def send_verification_requests(
     keyboard = verification_keyboard(task_id)
     delivered: list[BroadcastRecord] = []
     for user_id, chat_id in recipients:
-        try:
-            message = await bot.send_photo(
-                chat_id,
-                photo=photo_file_id,
-                caption=caption,
-                reply_markup=keyboard,
-            )
-        except Exception as exc:  # pragma: no cover - network
-            log.warning(
-                "Failed to send verification for task %s to %s: %s",
-                task_id,
-                chat_id,
-                exc,
-            )
+        message = await safe_send_photo(
+            bot,
+            chat_id,
+            photo=photo_file_id,
+            caption=caption,
+            reply_markup=keyboard,
+        )
+        if message is None:
             continue
         delivered.append(
             BroadcastRecord(

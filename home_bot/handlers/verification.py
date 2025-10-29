@@ -20,6 +20,7 @@ from ..db.repo import (
 from ..services.scoring import reward_for_completion
 from ..services.notifications import update_verification_messages
 from ..services.scheduler import get_lifecycle_controller
+from ..utils.telegram import safe_send_message
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -120,10 +121,7 @@ async def handle_vote(cb: CallbackQuery) -> None:
             feedback = "Голос принят. Ждём остальных."
 
     if performer_tg_id and decision:
-        try:
-            await cb.bot.send_message(performer_tg_id, feedback)
-        except Exception as exc:
-            log.warning("Failed to deliver vote result to %s: %s", performer_tg_id, exc)
+        await safe_send_message(cb.bot, performer_tg_id, feedback)
     if decision and broadcasts:
         await update_verification_messages(
             cb.bot,
@@ -133,6 +131,9 @@ async def handle_vote(cb: CallbackQuery) -> None:
             verdict_text=verdict_text or feedback,
         )
     await cb.answer(feedback if decision else "Голос учтён. Ждём остальных.")
+    lifecycle = _get_scheduler()
+    if lifecycle and decision:
+        await lifecycle.announce_pending_tasks()
     log.info(
         "Vote %s recorded for instance %s by %s (yes=%s, no=%s, decision=%s)",
         value,

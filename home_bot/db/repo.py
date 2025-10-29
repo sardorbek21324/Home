@@ -154,6 +154,37 @@ def seed_templates(session: Session, payload: Iterable[dict[str, object]]) -> No
         session.add(template)
 
 
+def create_task_template(
+    session: Session,
+    *,
+    code: str,
+    name: str,
+    points: int,
+    frequency: TaskFrequency | str,
+    max_per_day: int | None,
+    sla: int | None,
+    claim_timeout: int,
+    kind: TaskKind | str,
+    penalty: int = 0,
+    deferral_penalty_pct: int | None = None,
+) -> TaskTemplate:
+    template = TaskTemplate(
+        code=code,
+        title=name,
+        base_points=int(points),
+        frequency=frequency if isinstance(frequency, TaskFrequency) else TaskFrequency(str(frequency)),
+        max_per_day=int(max_per_day) if max_per_day is not None else None,
+        sla_minutes=int(sla) if sla is not None else 0,
+        claim_timeout_minutes=int(claim_timeout),
+        kind=kind if isinstance(kind, TaskKind) else TaskKind(str(kind)),
+        nobody_claimed_penalty=int(penalty or 0),
+        deferral_penalty_pct=int(deferral_penalty_pct) if deferral_penalty_pct is not None else 20,
+    )
+    session.add(template)
+    session.flush()
+    return template
+
+
 def create_instance(
     session: Session,
     template: TaskTemplate,

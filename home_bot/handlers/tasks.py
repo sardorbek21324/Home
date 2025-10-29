@@ -33,6 +33,7 @@ from ..services.notifications import (
 )
 from ..services.scheduler import get_lifecycle_controller
 from ..services.scoring import bonus_for_first_taker, penalty_for_skip
+from ..utils.telegram import answer_safe
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -59,20 +60,32 @@ def _get_scheduler() -> "BotScheduler | None":
     return get_lifecycle_controller()
 
 
-def build_tasks_overview() -> str:
-    """Return human friendly summary of open/reserved tasks."""
+def build_tasks_overview(*, active_only: bool = False) -> str:
+    """Return human friendly summary of tasks."""
 
     with SessionLocal() as session:
-        rows = (
+        query = (
             session.query(TaskInstance)
             .options(joinedload(TaskInstance.template))
-            .filter(TaskInstance.status.in_([TaskStatus.open, TaskStatus.reserved]))
-            .order_by(TaskInstance.created_at.asc())
-            .all()
         )
+        if active_only:
+            query = query.filter(
+                TaskInstance.status == TaskStatus.open,
+                TaskInstance.announced.is_(True),
+            )
+        else:
+            query = query.filter(
+                TaskInstance.status.in_([TaskStatus.open, TaskStatus.reserved])
+            )
+        rows = query.order_by(TaskInstance.created_at.asc()).all()
         if not rows:
-            return "🎉 Все задания разобраны. Можно сделать перерыв!"
-        lines = ["📋 Доступные задачи сегодня:"]
+            return (
+                "🎉 Активных задач нет — ждём новых объявлений."
+                if active_only
+                else "🎉 Все задания разобраны. Можно сделать перерыв!"
+            )
+        header = "📋 Активные задачи:" if active_only else "📋 Доступные задачи сегодня:"
+        lines = [header]
         for inst in rows:
             status = "🟢 свободна" if inst.status == TaskStatus.open else "🛠 в работе"
             effective_points = inst.effective_points or inst.template.base_points
@@ -86,7 +99,7 @@ def build_tasks_overview() -> str:
 
 @router.message(Command("tasks"))
 async def tasks_list(message: Message) -> None:
-    await message.answer(build_tasks_overview())
+    await answer_safe(message, build_tasks_overview())
 
 
 @router.callback_query(F.data.regexp(r"^(claim|postpone):\\d+(?::\\d+)?$"))
@@ -184,6 +197,7 @@ async def claim_task(cb: CallbackQuery) -> None:
     lifecycle = _get_scheduler()
     if lifecycle:
         lifecycle.cancel_open_jobs(instance_id)
+        _spawn_task(lifecycle.on_task_claimed(instance_id))
     deadline_log = deadline.isoformat() if deadline else "unknown"
     log.info(
         "Task %s reserved by %s (deferrals=%s, deadline=%s)",
@@ -229,6 +243,10 @@ async def cancel_task(cb: CallbackQuery) -> None:
         instance.reserved_until = None
         instance.deferrals_used = 0
         instance.progress = 0
+        instance.announced = False
+        instance.announcement_note = None
+        instance.announcement_penalize = False
+        instance.last_announce_at = None
         session.flush()
 
     await cb.message.edit_text("Бронь снята. Задача снова доступна всем.")
@@ -237,6 +255,7 @@ async def cancel_task(cb: CallbackQuery) -> None:
     if lifecycle:
         lifecycle.cancel_open_jobs(instance_id)
         _spawn_task(lifecycle.announce_instance(instance_id, penalize=False))
+        _spawn_task(lifecycle.announce_pending_tasks())
     log.info("Reservation for instance %s cancelled by %s", instance_id, cb.from_user.full_name)
 
 
@@ -255,7 +274,7 @@ async def request_report(cb: CallbackQuery) -> None:
         if instance.assigned_to != performer.id:
             await cb.answer("Задача закреплена за другим участником.", show_alert=True)
             return
-    await cb.message.answer("Пришли фото-отчёт в ответ на это сообщение.")
+    await answer_safe(cb.message, "Пришли фото-отчёт в ответ на это сообщение.")
     await cb.answer()
 
 
@@ -274,7 +293,7 @@ async def handle_photo(message: Message) -> None:
     with session_scope() as session:
         user = session.query(User).filter(User.tg_id == message.from_user.id).one_or_none()
         if not user:
-            await message.answer("Сначала /start")
+            await answer_safe(message, "Сначала /start")
             return
         instance = (
             session.query(TaskInstance)
@@ -286,7 +305,7 @@ async def handle_photo(message: Message) -> None:
             .first()
         )
         if not instance:
-            await message.answer("Нет задач, ожидающих фото.")
+            await answer_safe(message, "Нет задач, ожидающих фото.")
             return
         file_id = message.photo[-1].file_id
         report = submit_report(session, instance, user, file_id)
@@ -316,13 +335,13 @@ async def handle_photo(message: Message) -> None:
         session.flush()
 
     if auto_reject:
-        await message.answer(rejection_text + " Задача остаётся в работе.")
+        await answer_safe(message, rejection_text + " Задача остаётся в работе.")
         log.info(
             "Report auto-rejected for instance %s: no reviewers", instance_id
         )
         return
 
-    await message.answer("Фото получено. Ожидаем голоса семьи!")
+    await answer_safe(message, "Фото получено. Ожидаем голоса семьи!")
 
     _spawn_task(
         send_verification_requests(

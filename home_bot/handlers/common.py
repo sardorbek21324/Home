@@ -4,6 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from ..utils.telegram import answer_safe
 
 router = Router()
 
@@ -22,4 +23,4 @@ async def help_command(message: Message) -> None:
         "/ai_test — проверка OpenAI\n"
         "Админы: /family_list, /family_add, /family_remove, /regen_today, /debug_jobs"
     )
-    await message.answer(text)
+    await answer_safe(message, text)

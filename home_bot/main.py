@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date
 
+from aiohttp import ClientTimeout
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
-
-from datetime import date
 
 from .config import settings
 from .db.repo import init_db, seed_templates, session_scope
@@ -78,8 +79,11 @@ async def run_bot() -> None:
     with session_scope() as session:
         seed_templates(session, load_seed_templates())
 
+    timeout = ClientTimeout(total=20)
+    session = AiohttpSession(timeout=timeout)
     bot = Bot(
         token=settings.BOT_TOKEN,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()

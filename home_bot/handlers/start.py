@@ -3,6 +3,7 @@ from aiogram.filters import Command
 
 from ..db.repo import ensure_user, session_scope
 from ..menu import build_menu_keyboard
+from ..utils.telegram import answer_safe
 from .menu import render_menu_view
 
 router = Router()
@@ -27,7 +28,8 @@ async def start_cmd(message: types.Message) -> None:
         "\n• /tasks — прислать список текстом."
         "\n• /me и /history — быстрый доступ к очкам."
     )
-    await message.answer(
+    await answer_safe(
+        message,
         text + extra,
         reply_markup=build_menu_keyboard(message.from_user),
     )

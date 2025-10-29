@@ -12,6 +12,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from ..config import settings
+from ..utils.telegram import answer_safe
 
 router = Router()
 
@@ -84,13 +85,13 @@ async def add_family_member(message: Message) -> None:
         return
 
     if user.id not in settings.ADMIN_IDS:
-        await message.answer("🚫 У вас нет прав для добавления участников.")
+        await answer_safe(message, "🚫 У вас нет прав для добавления участников.")
         return
 
     text = message.text or ""
     parts = text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].isdigit():
-        await message.answer(
+        await answer_safe(
             "❗ Используйте формат: `/addfamily <Telegram_ID>`",
             parse_mode="Markdown",
         )
@@ -99,7 +100,8 @@ async def add_family_member(message: Message) -> None:
     new_id = int(parts[1])
 
     if new_id in FAMILY_IDS:
-        await message.answer(
+        await answer_safe(
+            message,
             "⚠️ Этот пользователь уже есть в списке семьи.",
         )
         return
@@ -110,6 +112,7 @@ async def add_family_member(message: Message) -> None:
 
     logger.info("Admin %s added family member id %s", user.id, new_id)
 
-    await message.answer(
+    await answer_safe(
+        message,
         f"👨‍👩‍👧‍👦 Участник с ID {new_id} добавлен в семью!",
     )

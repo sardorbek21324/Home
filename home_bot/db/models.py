@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -26,6 +28,7 @@ class TaskFrequency(str, PyEnum):
     daily = "daily"
     weekly = "weekly"
     every_2days = "every_2days"
+    monthly = "monthly"
     custom = "custom"
 
 
@@ -33,6 +36,7 @@ class TaskKind(str, PyEnum):
     house = "house"
     mini = "mini"
     outside = "outside"
+    micro = "micro"
 
 
 class TaskStatus(str, PyEnum):
@@ -116,6 +120,9 @@ class TaskInstance(Base):
     last_announce_at: Mapped[datetime | None] = mapped_column(DateTime)
     round_no: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    announced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    announcement_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    announcement_penalize: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     template: Mapped[TaskTemplate] = relationship(back_populates="instances")
     report: Mapped[Optional["Report"]] = relationship(back_populates="task_instance", uselist=False)

@@ -9,6 +9,7 @@ from aiogram.types import Message
 from ..config import settings
 from ..db.repo import session_scope
 from ..services.ai_controller import AIController
+from ..utils.telegram import answer_safe
 
 router = Router()
 
@@ -20,7 +21,7 @@ def _require_admin(message: Message) -> bool:
 @router.message(Command("ai_stats"))
 async def ai_stats(message: Message) -> None:
     if not _require_admin(message):
-        await message.answer("Команда доступна только администраторам.")
+        await answer_safe(message, "Команда доступна только администраторам.")
         return
 
     controller = AIController()
@@ -28,12 +29,13 @@ async def ai_stats(message: Message) -> None:
         stats = controller.get_user_stats(session)
         config = controller.get_config(session)
     if not stats:
-        await message.answer(
+        await answer_safe(
+            message,
             (
                 "Данных пока нет. Никто не выполнял задания.\n"
                 f"Текущие параметры: penalty={config.penalty_step:.2f}, "
                 f"bonus={config.bonus_step:.2f}, range={config.min_coefficient:.2f}-{config.max_coefficient:.2f}."
-            )
+            ),
         )
         return
 
@@ -46,13 +48,13 @@ async def ai_stats(message: Message) -> None:
         lines.append(
             f"• {item.name}: coef={item.coefficient:.2f}, взято={item.taken}, завершено={item.completed}, пропущено={item.skipped}"
         )
-    await message.answer("\n".join(lines))
+    await answer_safe(message, "\n".join(lines))
 
 
 @router.message(Command("ai_config"))
 async def ai_config(message: Message) -> None:
     if not _require_admin(message):
-        await message.answer("Команда доступна только администраторам.")
+        await answer_safe(message, "Команда доступна только администраторам.")
         return
 
     parts = message.text.split()[1:]
@@ -66,7 +68,7 @@ async def ai_config(message: Message) -> None:
         try:
             updates[key] = float(value)
         except ValueError:
-            await message.answer(f"Не удалось распарсить значение для {key!r}.")
+            await answer_safe(message, f"Не удалось распарсить значение для {key!r}.")
             return
 
     with session_scope() as session:
@@ -80,7 +82,8 @@ async def ai_config(message: Message) -> None:
                 default_coefficient=updates.get("default"),
             )
         config = controller.get_config(session)
-    await message.answer(
+    await answer_safe(
+        message,
         (
             "Текущие параметры AI:\n"
             f"• penalty_step={config.penalty_step:.2f}\n"
@@ -88,5 +91,5 @@ async def ai_config(message: Message) -> None:
             f"• min_coefficient={config.min_coefficient:.2f}\n"
             f"• max_coefficient={config.max_coefficient:.2f}\n"
             f"• default_coefficient={config.default_coefficient:.2f}"
-        )
+        ),
     )
