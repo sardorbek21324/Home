@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from ..config import settings
+from ..compat.aiogram_exceptions import MessageNotModified, TelegramBadRequest
 from ..menu import build_menu_keyboard
 from ..utils.telegram import answer_safe
 from . import score, tasks
@@ -81,10 +82,18 @@ async def handle_menu_callback(callback: types.CallbackQuery) -> None:
         return
     _, _, action = callback.data.partition(":")
     text = await render_menu_view(action or "home", callback.from_user)
-    await callback.message.edit_text(
-        text,
-        reply_markup=build_inline_menu_keyboard(callback.from_user),
-    )
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=build_inline_menu_keyboard(callback.from_user),
+        )
+    except MessageNotModified:
+        pass
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            pass
+        else:
+            raise
     await callback.answer()
 @router.message(F.text == "📊 Баланс")
 async def show_balance_shortcut(message: types.Message) -> None:

@@ -8,13 +8,13 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Sequence
 
 from aiogram import F, Router
-from aiogram.exceptions import MessageNotModified, TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from sqlalchemy.orm import joinedload
 
 from ..config import settings
+from ..compat.aiogram_exceptions import MessageNotModified, TelegramBadRequest
 from ..db import SessionLocal
 from ..db.models import TaskInstance, TaskStatus, User
 from ..db.repo import (
@@ -111,11 +111,17 @@ async def _remove_reply_markup(message: Message) -> None:
     except MessageNotModified:
         log.debug("Reply markup already removed for message %s", message.message_id)
     except TelegramBadRequest as exc:
-        log.warning(
-            "Failed to remove reply markup for message %s: %s",
-            message.message_id,
-            exc,
-        )
+        if "message is not modified" in str(exc).lower():
+            log.debug(
+                "Reply markup already removed for message %s (via bad request)",
+                message.message_id,
+            )
+        else:
+            log.warning(
+                "Failed to remove reply markup for message %s: %s",
+                message.message_id,
+                exc,
+            )
 
 
 async def _edit_message_text(message: Message, text: str, *, instance_id: int) -> None:
@@ -124,12 +130,19 @@ async def _edit_message_text(message: Message, text: str, *, instance_id: int) -
     except MessageNotModified:
         log.debug("Message %s already updated for task %s", message.message_id, instance_id)
     except TelegramBadRequest as exc:
-        log.warning(
-            "Failed to edit message %s for task %s: %s",
-            message.message_id,
-            instance_id,
-            exc,
-        )
+        if "message is not modified" in str(exc).lower():
+            log.debug(
+                "Message %s already updated for task %s (via bad request)",
+                message.message_id,
+                instance_id,
+            )
+        else:
+            log.warning(
+                "Failed to edit message %s for task %s: %s",
+                message.message_id,
+                instance_id,
+                exc,
+            )
 
 
 async def _handle_task_action(
@@ -356,7 +369,26 @@ async def cancel_task(cb: CallbackQuery) -> None:
         instance.last_announce_at = None
         session.flush()
 
-    await cb.message.edit_text("Бронь снята. Задача снова доступна всем.")
+    try:
+        await cb.message.edit_text("Бронь снята. Задача снова доступна всем.")
+    except MessageNotModified:
+        log.debug(
+            "Cancellation message already updated for instance %s (message_id=%s)",
+            instance_id,
+            cb.message.message_id if cb.message else None,
+        )
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            log.debug(
+                "Cancellation message already updated for instance %s via bad request",
+                instance_id,
+            )
+        else:
+            log.warning(
+                "Failed to edit cancellation message for instance %s: %s",
+                instance_id,
+                exc,
+            )
     await cb.answer("Отменено")
     lifecycle = _get_scheduler()
     if lifecycle:
