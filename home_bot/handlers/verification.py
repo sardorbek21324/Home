@@ -21,6 +21,7 @@ from ..services.scoring import reward_for_completion
 from ..services.notifications import update_verification_messages
 from ..services.scheduler import get_lifecycle_controller
 from ..utils.telegram import safe_send_message
+from ..utils.text import escape_html
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -47,7 +48,8 @@ async def handle_vote(cb: CallbackQuery) -> None:
 
     performer_tg_id = None
     performer_name = ""
-    feedback = "Голос учтён."
+    feedback_plain = "Голос учтён."
+    feedback_html = None
     decision = None
     broadcasts: list | tuple = []
     verdict_text = ""
@@ -82,6 +84,7 @@ async def handle_vote(cb: CallbackQuery) -> None:
         register_vote(session, instance, voter, VoteValue(value))
         yes, no = votes_summary(session, instance)
         template_title = instance.template.title
+        safe_title = escape_html(template_title)
         total_votes = yes + no
 
         lifecycle = _get_scheduler()
@@ -101,7 +104,8 @@ async def handle_vote(cb: CallbackQuery) -> None:
                 )
                 instance.status = TaskStatus.approved
                 instance.progress = 100
-                feedback = f"✅ {template_title} подтверждено. +{reward} баллов."
+                feedback_plain = f"✅ {template_title} подтверждено. +{reward} баллов."
+                feedback_html = f"✅ {safe_title} подтверждено. +{reward} баллов."
                 verdict_text = "Отчёт принят ✅"
                 decision = "approved"
             else:
@@ -113,24 +117,25 @@ async def handle_vote(cb: CallbackQuery) -> None:
                 if instance.report:
                     session.delete(instance.report)
                     instance.report = None
-                feedback = f"❌ {template_title} отклонено. Попробуй ещё раз!"
+                feedback_plain = f"❌ {template_title} отклонено. Попробуй ещё раз!"
+                feedback_html = f"❌ {safe_title} отклонено. Попробуй ещё раз!"
                 verdict_text = "Отчёт отклонён ❌"
                 decision = "retry"
             broadcasts = pop_task_broadcasts(session, instance.id)
         else:
-            feedback = "Голос принят. Ждём остальных."
+            feedback_plain = "Голос принят. Ждём остальных."
 
-    if performer_tg_id and decision:
-        await safe_send_message(cb.bot, performer_tg_id, feedback)
+    if performer_tg_id and decision and feedback_html:
+        await safe_send_message(cb.bot, performer_tg_id, feedback_html)
     if decision and broadcasts:
         await update_verification_messages(
             cb.bot,
             broadcasts=broadcasts,
             template_title=template_title,
             performer_name=performer_name or cb.from_user.full_name,
-            verdict_text=verdict_text or feedback,
+            verdict_text=verdict_text or feedback_plain,
         )
-    await cb.answer(feedback if decision else "Голос учтён. Ждём остальных.")
+    await cb.answer(feedback_plain if decision else "Голос учтён. Ждём остальных.")
     lifecycle = _get_scheduler()
     if lifecycle and decision:
         await lifecycle.announce_pending_tasks()

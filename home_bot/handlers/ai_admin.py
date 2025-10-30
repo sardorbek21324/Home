@@ -10,6 +10,7 @@ from ..config import settings
 from ..db.repo import session_scope
 from ..services.ai_controller import AIController
 from ..utils.telegram import answer_safe
+from ..utils.text import escape_html
 
 router = Router()
 
@@ -45,8 +46,9 @@ async def ai_stats(message: Message) -> None:
         "Пользователи:",
     ]
     for item in stats:
+        name = escape_html(item.name)
         lines.append(
-            f"• {item.name}: coef={item.coefficient:.2f}, взято={item.taken}, завершено={item.completed}, пропущено={item.skipped}"
+            f"• {name}: coef={item.coefficient:.2f}, взято={item.taken}, завершено={item.completed}, пропущено={item.skipped}"
         )
     await answer_safe(message, "\n".join(lines))
 
@@ -68,7 +70,7 @@ async def ai_config(message: Message) -> None:
         try:
             updates[key] = float(value)
         except ValueError:
-            await answer_safe(message, f"Не удалось распарсить значение для {key!r}.")
+            await answer_safe(message, f"Не удалось распарсить значение для {escape_html(key)}.")
             return
 
     with session_scope() as session:

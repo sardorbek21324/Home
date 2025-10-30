@@ -36,6 +36,7 @@ from ..services.notifications import (
 from ..services.scheduler import get_lifecycle_controller
 from ..services.scoring import bonus_for_first_taker, penalty_for_skip
 from ..utils.telegram import answer_safe
+from ..utils.text import escape_html
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
@@ -92,8 +93,9 @@ def build_tasks_overview(*, active_only: bool = False) -> str:
         for inst in rows:
             status = "🟢 свободна" if inst.status == TaskStatus.open else "🛠 в работе"
             effective_points = inst.effective_points or inst.template.base_points
+            title = escape_html(inst.template.title)
             lines.append(
-                f"• <b>{inst.template.title}</b> (+{effective_points})\n"
+                f"• <b>{title}</b> (+{effective_points})\n"
                 f"  {status} | прогресс: {inst.progress}% | попыток: {inst.attempts} | переносов: {inst.deferrals_used or 0}"
             )
         lines.append("\nЖми на кнопку под задачей в чате, чтобы взять её в работу.")
@@ -279,10 +281,12 @@ async def _handle_task_action(
         return
 
     await _remove_reply_markup(cb.message)
+    safe_title = escape_html(template_title)
+    safe_claimer = escape_html(cb.from_user.full_name or "")
     await _edit_message_text(
         cb.message,
         (
-            f"{template_title} закреплена за {cb.from_user.full_name}."
+            f"{safe_title} закреплена за {safe_claimer}."
             " Выполни и пришли фото."
         ),
         instance_id=instance_id,
