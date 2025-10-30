@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Iterator, Sequence
 
-from sqlalchemy import and_, func, select, update, insert
+from sqlalchemy import and_, func, select, insert
 from sqlalchemy.orm import Session
 
 from . import Base, SessionLocal, engine
@@ -283,25 +283,19 @@ def try_claim_task(
     reserved_until: datetime,
     deferrals_used: int,
 ) -> bool:
-    stmt = (
-        update(TaskInstance)
-        .where(
-            TaskInstance.id == instance_id,
-            TaskInstance.status == TaskStatus.open,
-        )
-        .values(
-            status=TaskStatus.reserved,
-            assigned_to=user_id,
-            reserved_until=reserved_until,
-            deferrals_used=deferrals_used,
-            attempts=TaskInstance.attempts + 1,
-            progress=50,
-            round_no=0,
-        )
-        .returning(TaskInstance.id)
-    )
-    result = session.execute(stmt).scalar_one_or_none()
-    return result is not None
+    instance = session.get(TaskInstance, instance_id)
+    if not instance or instance.status != TaskStatus.open:
+        return False
+
+    instance.status = TaskStatus.reserved
+    instance.assigned_to = user_id
+    instance.reserved_until = reserved_until
+    instance.deferrals_used = deferrals_used
+    instance.attempts = (instance.attempts or 0) + 1
+    instance.progress = 50
+    instance.round_no = 0
+    session.flush()
+    return True
 
 
 def ensure_ai_settings(session: Session) -> AISettings:
