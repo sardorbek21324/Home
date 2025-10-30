@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..db.repo import BroadcastRecord, add_task_broadcasts, session_scope
+from ..domain.callbacks import ClaimTaskCallback, PostponeTaskCallback
 from ..utils.telegram import safe_send_message, safe_send_photo
 
 log = logging.getLogger(__name__)
@@ -17,16 +18,19 @@ log = logging.getLogger(__name__)
 
 def _task_keyboard(instance_id: int, *, allow_first: bool, allow_second: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🏁 Беру", callback_data=f"claim:{instance_id}")
+    builder.button(
+        text="🏁 Беру",
+        callback_data=ClaimTaskCallback(task_id=instance_id).pack(),
+    )
     if allow_first:
         builder.button(
             text="⏳ Через 30 мин (−20%)",
-            callback_data=f"postpone:{instance_id}:1",
+            callback_data=PostponeTaskCallback(task_id=instance_id, level=1).pack(),
         )
     if allow_second:
         builder.button(
             text="⏳ Через 60 мин (−40%)",
-            callback_data=f"postpone:{instance_id}:2",
+            callback_data=PostponeTaskCallback(task_id=instance_id, level=2).pack(),
         )
     builder.button(text="🚫 Отменить бронь", callback_data=f"cancel:{instance_id}")
     builder.adjust(1)

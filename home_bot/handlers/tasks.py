@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from aiogram import F, Router
+from aiogram.exceptions import MessageNotModified, TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
@@ -26,6 +27,7 @@ from ..db.repo import (
     try_claim_task,
 )
 from ..domain.constants import CANCEL_GRACE_MINUTES, CANCEL_LATE_PENALTY, CLAIM_DEFER_MINUTES
+from ..domain.callbacks import ClaimTaskCallback, PostponeTaskCallback
 from ..services.notifications import (
     report_keyboard,
     send_verification_requests,
@@ -37,6 +39,7 @@ from ..utils.telegram import answer_safe
 
 if TYPE_CHECKING:
     from ..services.scheduler import BotScheduler
+    from ..db.repo import BroadcastRecord
 
 
 router = Router()
@@ -102,94 +105,185 @@ async def tasks_list(message: Message) -> None:
     await answer_safe(message, build_tasks_overview())
 
 
-@router.callback_query(F.data.regexp(r"^(claim|postpone):\\d+(?::\\d+)?$"))
-async def claim_task(cb: CallbackQuery) -> None:
+async def _remove_reply_markup(message: Message) -> None:
+    try:
+        await message.edit_reply_markup(reply_markup=None)
+    except MessageNotModified:
+        log.debug("Reply markup already removed for message %s", message.message_id)
+    except TelegramBadRequest as exc:
+        log.warning(
+            "Failed to remove reply markup for message %s: %s",
+            message.message_id,
+            exc,
+        )
+
+
+async def _edit_message_text(message: Message, text: str, *, instance_id: int) -> None:
+    try:
+        await message.edit_text(text, reply_markup=report_keyboard(instance_id))
+    except MessageNotModified:
+        log.debug("Message %s already updated for task %s", message.message_id, instance_id)
+    except TelegramBadRequest as exc:
+        log.warning(
+            "Failed to edit message %s for task %s: %s",
+            message.message_id,
+            instance_id,
+            exc,
+        )
+
+
+async def _handle_task_action(
+    cb: CallbackQuery,
+    *,
+    action: str,
+    instance_id: int,
+    postpone_level: int = 0,
+) -> None:
     if cb.from_user is None or cb.message is None:
         return
-    parts = cb.data.split(":")
-    if len(parts) < 2:
-        await cb.answer()
-        return
-    action = parts[0]
-    instance_id = int(parts[1])
-    postpone_level = int(parts[2]) if len(parts) > 2 else 0
+
+    try:
+        await cb.answer("Оформляю…", show_alert=False)
+    except Exception as exc:  # pragma: no cover - Telegram API edge cases
+        log.debug("Failed to answer callback %s: %s", cb.id, exc)
+
+    log.info(
+        "Processing task callback action=%s task_id=%s user=%s",
+        action,
+        instance_id,
+        cb.from_user.id,
+    )
+
+    broadcasts: Sequence[BroadcastRecord] = ()
+    claimer_user_id: int | None = None
+    template_title: str | None = None
+    success = False
 
     with session_scope() as session:
         instance = session.get(TaskInstance, instance_id)
         if not instance or instance.status != TaskStatus.open:
-            await cb.answer("Задача уже занята.", show_alert=True)
-            return
-        user = ensure_user(session, cb.from_user.id, cb.from_user.full_name, cb.from_user.username)
-        template = instance.template
-        current_deferrals = max(instance.deferrals_used or 0, 0)
-        extra_minutes = 0
-        target_deferrals = 0
-        was_first = (instance.attempts or 0) == 0 and (instance.deferrals_used or 0) == 0
-        if action == "postpone":
-            if postpone_level not in (1, 2):
-                await cb.answer("Опция недоступна.", show_alert=True)
-                return
-            if current_deferrals >= 2:
-                await cb.answer("Отложить можно не больше двух раз.", show_alert=True)
-                return
-            if postpone_level == 1:
-                target_deferrals = min(current_deferrals + 1, 2)
-            else:
-                target_deferrals = 2
-            if target_deferrals <= current_deferrals:
-                await cb.answer("Опция недоступна.", show_alert=True)
-                return
-            extra_minutes = CLAIM_DEFER_MINUTES * postpone_level
-        reserved_until = datetime.utcnow() + timedelta(minutes=template.sla_minutes + extra_minutes)
-        success = try_claim_task(
-            session,
-            instance_id=instance.id,
-            user_id=user.id,
-            reserved_until=reserved_until,
-            deferrals_used=target_deferrals,
-        )
-        if not success:
-            await cb.answer("Задача уже занята.", show_alert=True)
-            return
-        session.refresh(instance)
-        broadcasts = pop_task_broadcasts(session, instance.id)
-        template_title = template.title
-        deadline = instance.reserved_until
-        deferrals = instance.deferrals_used
-        if action == "postpone":
-            penalty_value = penalty_for_skip(target_deferrals)
-            if penalty_value:
-                add_score_event(
-                    session,
-                    user,
-                    -penalty_value,
-                    "Перенос задачи",
-                    task_instance=instance,
-                )
-        elif action == "claim":
-            bonus = bonus_for_first_taker(was_first)
-            if bonus:
-                add_score_event(
-                    session,
-                    user,
-                    bonus,
-                    "Бонус за первого исполнителя",
-                    task_instance=instance,
-                )
+            template_title = instance.template.title if instance and instance.template else None
+            log.info(
+                "Task %s unavailable for action %s (status=%s)",
+                instance_id,
+                action,
+                getattr(instance, "status", None),
+            )
+        else:
+            user = ensure_user(
+                session,
+                cb.from_user.id,
+                cb.from_user.full_name,
+                cb.from_user.username,
+            )
+            template = instance.template
+            template_title = template.title
+            current_deferrals = max(instance.deferrals_used or 0, 0)
+            extra_minutes = 0
+            target_deferrals = 0
+            was_first = (instance.attempts or 0) == 0 and (instance.deferrals_used or 0) == 0
 
-    await cb.message.edit_text(
+            if action == "postpone":
+                if postpone_level not in (1, 2):
+                    log.info(
+                        "Invalid postpone level %s for task %s", postpone_level, instance_id
+                    )
+                    await cb.answer("Опция недоступна.", show_alert=True)
+                    return
+                if current_deferrals >= 2:
+                    log.info("Postpone limit reached for task %s", instance_id)
+                    await cb.answer("Отложить можно не больше двух раз.", show_alert=True)
+                    return
+                if postpone_level == 1:
+                    target_deferrals = min(current_deferrals + 1, 2)
+                else:
+                    target_deferrals = 2
+                if target_deferrals <= current_deferrals:
+                    log.info(
+                        "Postpone option not available (current=%s target=%s) for task %s",
+                        current_deferrals,
+                        target_deferrals,
+                        instance_id,
+                    )
+                    await cb.answer("Опция недоступна.", show_alert=True)
+                    return
+                extra_minutes = CLAIM_DEFER_MINUTES * postpone_level
+            reserved_until = datetime.utcnow() + timedelta(
+                minutes=template.sla_minutes + extra_minutes
+            )
+            success = try_claim_task(
+                session,
+                instance_id=instance.id,
+                user_id=user.id,
+                reserved_until=reserved_until,
+                deferrals_used=target_deferrals,
+            )
+            log.info(
+                "Reservation attempt result task=%s action=%s success=%s",
+                instance_id,
+                action,
+                success,
+            )
+            if success:
+                claimer_user_id = user.id
+                session.refresh(instance)
+                broadcasts = pop_task_broadcasts(session, instance.id)
+                if action == "postpone":
+                    penalty_value = penalty_for_skip(target_deferrals)
+                    if penalty_value:
+                        add_score_event(
+                            session,
+                            user,
+                            -penalty_value,
+                            "Перенос задачи",
+                            task_instance=instance,
+                        )
+                elif action == "claim":
+                    bonus = bonus_for_first_taker(was_first)
+                    if bonus:
+                        add_score_event(
+                            session,
+                            user,
+                            bonus,
+                            "Бонус за первого исполнителя",
+                            task_instance=instance,
+                        )
+
+    if not success:
+        await _remove_reply_markup(cb.message)
+        await cb.message.answer("❌ Слот уже забрали.")
+        try:
+            await cb.answer("❌ Слот уже забрали.", show_alert=False)
+        except Exception as exc:  # pragma: no cover - Telegram API edge cases
+            log.debug("Failed to send failure callback answer for task %s: %s", instance_id, exc)
+        return
+
+    if template_title is None or claimer_user_id is None:
+        log.warning(
+            "Successful reservation without template title/user (task=%s)",
+            instance_id,
+        )
+        return
+
+    await _remove_reply_markup(cb.message)
+    await _edit_message_text(
+        cb.message,
         (
             f"{template_title} закреплена за {cb.from_user.full_name}."
             " Выполни и пришли фото."
         ),
-        reply_markup=report_keyboard(instance_id),
+        instance_id=instance_id,
     )
-    await cb.answer("Удачи! Не забудь отправить отчёт.")
+    await cb.message.answer(f"✅ Задача #{instance_id} закреплена за вами.")
+    try:
+        await cb.answer("Готово!", show_alert=False)
+    except Exception as exc:  # pragma: no cover - Telegram API edge cases
+        log.debug("Failed to send success callback answer for task %s: %s", instance_id, exc)
     _spawn_task(
         update_after_claim(
             cb.bot,
             broadcasts=broadcasts,
-            claimer_user_id=user.id,
+            claimer_user_id=claimer_user_id,
             claimer_name=cb.from_user.full_name,
             template_title=template_title,
         )
@@ -198,13 +292,26 @@ async def claim_task(cb: CallbackQuery) -> None:
     if lifecycle:
         lifecycle.cancel_open_jobs(instance_id)
         _spawn_task(lifecycle.on_task_claimed(instance_id))
-    deadline_log = deadline.isoformat() if deadline else "unknown"
-    log.info(
-        "Task %s reserved by %s (deferrals=%s, deadline=%s)",
-        instance_id,
-        cb.from_user.full_name,
-        deferrals,
-        deadline_log,
+
+
+@router.callback_query(ClaimTaskCallback.filter())
+async def claim_task(cb: CallbackQuery, callback_data: ClaimTaskCallback) -> None:
+    await _handle_task_action(
+        cb,
+        action="claim",
+        instance_id=callback_data.task_id,
+    )
+
+
+@router.callback_query(PostponeTaskCallback.filter())
+async def postpone_task(
+    cb: CallbackQuery, callback_data: PostponeTaskCallback
+) -> None:
+    await _handle_task_action(
+        cb,
+        action="postpone",
+        instance_id=callback_data.task_id,
+        postpone_level=callback_data.level,
     )
 
 

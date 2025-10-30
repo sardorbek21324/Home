@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Iterator, Sequence
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, select, update, insert
 from sqlalchemy.orm import Session
 
 from . import Base, SessionLocal, engine
@@ -29,6 +30,9 @@ from .models import (
     VoteValue,
 )
 from ..config import get_family_user_ids
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -327,17 +331,47 @@ def open_dispute(session: Session, instance: TaskInstance, opened_by: User, note
 
 
 def add_task_broadcasts(session: Session, records: Sequence[BroadcastRecord]) -> None:
-    for record in records:
-        session.add(
-            TaskBroadcast(
-                task_id=record.task_id,
-                user_id=record.user_id,
-                chat_id=record.chat_id,
-                message_id=record.message_id,
-            )
+    if not records:
+        return
+
+    values = [
+        {
+            "task_id": record.task_id,
+            "user_id": record.user_id,
+            "chat_id": record.chat_id,
+            "message_id": record.message_id,
+        }
+        for record in records
+    ]
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else "sqlite"
+
+    if dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        stmt = sqlite_insert(TaskBroadcast).values(values).prefix_with("OR IGNORE")
+    elif dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(TaskBroadcast).values(values).on_conflict_do_nothing(
+            index_elements=[TaskBroadcast.task_id, TaskBroadcast.user_id]
         )
-    if records:
-        session.flush()
+    else:
+        stmt = insert(TaskBroadcast).values(values)
+
+    result = session.execute(stmt)
+    inserted = result.rowcount if result.rowcount is not None and result.rowcount >= 0 else len(values)
+    duplicates = max(len(values) - inserted, 0)
+
+    log.info(
+        "Persisted task broadcasts: total=%s inserted=%s duplicates=%s (dialect=%s)",
+        len(values),
+        inserted,
+        duplicates,
+        dialect,
+    )
+    if duplicates:
+        log.info("Duplicate task broadcasts ignored: %s", duplicates)
 
 
 def list_task_broadcasts(session: Session, task_id: int) -> Sequence[BroadcastRecord]:
