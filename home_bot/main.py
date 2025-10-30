@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import aiogram
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -73,6 +75,9 @@ async def run_bot() -> None:
 
     setup_logging()
     logging.getLogger(__name__).info("Starting bot...")
+    logging.getLogger(__name__).info(
+        "Aiogram version: %s", getattr(aiogram, "__version__", "unknown")
+    )
 
     init_db()
     with session_scope() as session:
