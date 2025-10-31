@@ -18,6 +18,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.error import Conflict
 
 from .config import BOT_TOKEN
 
@@ -305,6 +306,29 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def handle_application_error(
+    update: object, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Gracefully handle errors raised by the bot."""
+
+    error = context.error
+    if isinstance(error, Conflict):
+        logger.error(
+            "Another polling instance is already running. "
+            "Stopping the current application."
+        )
+        application = context.application
+        if application:
+            await application.stop()
+        return
+
+    logger.error(
+        "Unhandled error while processing update %s",
+        update,
+        exc_info=(type(error), error, error.__traceback__) if error else None,
+    )
+
+
 def main() -> None:
     """Run the bot."""
     application = Application.builder().token(BOT_TOKEN).build()
@@ -328,6 +352,7 @@ def main() -> None:
     application.add_handler(CommandHandler("listtasks", list_tasks))
     application.add_handler(conversation_handler)
     application.add_handler(CallbackQueryHandler(accept_task))
+    application.add_error_handler(handle_application_error)
 
     logger.info("Bot is starting. Waiting for commands…")
     application.run_polling()
