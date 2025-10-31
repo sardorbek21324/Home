@@ -319,9 +319,15 @@ async def handle_application_error(
         )
         application = context.application
         if application:
-            if application.running:
-                await application.stop()
-            await application.shutdown()
+            try:
+                if application.running:
+                    await application.stop()
+                await application.shutdown()
+            except RuntimeError as exc:
+                logger.warning(
+                    "Skipping shutdown because the application is still stopping: %s",
+                    exc,
+                )
         return
 
     logger.error(
