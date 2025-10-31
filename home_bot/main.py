@@ -321,8 +321,7 @@ async def handle_application_error(
         if application:
             if application.running:
                 await application.stop()
-            else:
-                logger.debug("Application already stopped; no action required.")
+            await application.shutdown()
         return
 
     logger.error(
@@ -358,7 +357,13 @@ def main() -> None:
     application.add_error_handler(handle_application_error)
 
     logger.info("Bot is starting. Waiting for commands…")
-    application.run_polling()
+    try:
+        application.run_polling()
+    except Conflict:
+        logger.error(
+            "Another polling instance is already running. Exiting the current process."
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
