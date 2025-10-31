@@ -1,4 +1,0 @@
-.env
-*.db
-__pycache__/
-home_bot/local_settings.py
