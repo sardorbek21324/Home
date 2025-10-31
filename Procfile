@@ -1,1 +1,1 @@
-worker: python -m home_bot.main
+worker: python home_tasks_bot.py
