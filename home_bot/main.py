@@ -319,7 +319,10 @@ async def handle_application_error(
         )
         application = context.application
         if application:
-            await application.stop()
+            if application.running:
+                await application.stop()
+            else:
+                logger.debug("Application already stopped; no action required.")
         return
 
     logger.error(
