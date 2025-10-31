@@ -1,17 +1,19 @@
-"""Simple Telegram bot with a ping command to check health."""
+"""Telegram bot entry point used by hosting platforms."""
+from __future__ import annotations
+
 import logging
 import sys
+
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+from .config import BOT_TOKEN
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-
-from config import BOT_TOKEN
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
