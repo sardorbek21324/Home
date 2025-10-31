@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Dict, List
@@ -319,10 +320,16 @@ async def handle_application_error(
         )
         application = context.application
         if application:
-            if application.running:
-                await application.stop()
-            await application.shutdown()
-        return
+            try:
+                if application.running:
+                    await application.stop()
+            except RuntimeError:
+                logger.warning("Application was already stopping when Conflict occurred.")
+
+            with suppress(RuntimeError):
+                await application.shutdown()
+
+        raise SystemExit(1)
 
     logger.error(
         "Unhandled error while processing update %s",
