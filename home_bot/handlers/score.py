@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram import Router
-from aiogram.filters import Command
 from aiogram.types import Message
 
 from ..db.models import ScoreEvent, User
 from ..db.repo import list_users, session_scope
 from ..utils.telegram import answer_safe
+from ..utils.text import escape_html
 
 
 router = Router()
@@ -30,8 +29,9 @@ def _format_history(rows: list[ScoreEvent]) -> str:
     lines = ["📅 Последние события"]
     for event in rows:
         sign = "➕" if event.delta >= 0 else "➖"
+        reason = escape_html(event.reason)
         lines.append(
-            f"{event.created_at:%d.%m %H:%M} — {sign}{abs(event.delta)} за {event.reason}"
+            f"{event.created_at:%d.%m %H:%M} — {sign}{abs(event.delta)} за {reason}"
         )
     return "\n".join(lines)
 
@@ -62,7 +62,10 @@ def build_history_text(tg_id: int) -> str:
 @router.message(Command("rating"))
 async def show_rating(message: Message) -> None:
     with session_scope() as session:
-        entries = [(user.username or user.name or str(user.tg_id), user.score) for user in list_users(session)]
+        entries = [
+            (escape_html(user.username or user.name or str(user.tg_id)), user.score)
+            for user in list_users(session)
+        ]
     if not entries:
         await answer_safe(message, "Пока нет участников.")
         return

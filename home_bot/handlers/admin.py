@@ -34,6 +34,7 @@ from ..db.repo import (
     session_scope,
 )
 from ..utils.telegram import answer_safe
+from ..utils.text import escape_html
 from ..services.scoring import reward_for_completion
 from ..services.scheduler import get_lifecycle_controller
 
@@ -121,7 +122,8 @@ async def add_task(message: Message) -> None:
             nobody_claimed_penalty=int(penalty or 0),
         )
         session.add(template)
-    await answer_safe(message, f"Шаблон {title} добавлен.")
+    safe_title = escape_html(title)
+    await answer_safe(message, f"Шаблон {safe_title} добавлен.")
     log.info("Admin %s added task template %s", message.from_user.id, code)
 
 
@@ -214,9 +216,15 @@ async def list_disputes(message: Message) -> None:
             instance = dispute.task_instance
             performer = session.get(User, instance.assigned_to) if instance.assigned_to else None
             opener = session.get(User, dispute.opened_by)
+            title = escape_html(instance.template.title)
+            performer_name = escape_html(performer.name) if performer else "неизвестно"
+            opener_name = (
+                escape_html(opener.name) if opener else escape_html(str(dispute.opened_by))
+            )
+            note_text = escape_html(dispute.note or "—")
             lines.append(
-                f"#{dispute.id} — {instance.template.title} (исполнитель: {performer.name if performer else 'неизвестно'})\n"
-                f"    Открыл: {opener.name if opener else dispute.opened_by}, примечание: {dispute.note or '—'}"
+                f"#{dispute.id} — {title} (исполнитель: {performer_name})\n"
+                f"    Открыл: {opener_name}, примечание: {note_text}"
             )
     await answer_safe(message, "\n".join(lines))
 
@@ -285,16 +293,23 @@ async def end_month(message: Message) -> None:
     season = datetime.now().strftime("%Y-%m")
     with session_scope() as session:
         users = session.query(User).order_by(User.score.desc()).all()
-        snapshot = [(user.name, user.score) for user in users]
+        snapshot = [
+            (escape_html(user.name or user.username or str(user.tg_id)), user.score)
+            for user in users
+        ]
         winner = reset_month(session, season)
 
     if not snapshot:
         await answer_safe(message, "Нет участников для подведения итогов.")
         return
 
-    lines = [f"{idx + 1}. {name} — {score} баллов" for idx, (name, score) in enumerate(snapshot)]
+    lines = [
+        f"{idx + 1}. {name} — {score} баллов" for idx, (name, score) in enumerate(snapshot)
+    ]
     winner_text = (
-        f"🥇 Победитель: {winner.name} ({winner.score} баллов)" if winner else "Нет победителей"
+        f"🥇 Победитель: {escape_html(winner.name or '')} ({winner.score} баллов)"
+        if winner
+        else "Нет победителей"
     )
     await answer_safe(
         message,

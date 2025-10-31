@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..db.repo import BroadcastRecord, add_task_broadcasts, session_scope
 from ..domain.callbacks import ClaimTaskCallback, PostponeTaskCallback
 from ..utils.telegram import safe_send_message, safe_send_photo
+from ..utils.text import escape_html
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +106,9 @@ async def update_after_claim(
     """Edit previously sent keyboards once the task has been claimed."""
 
     records = list(broadcasts)
-    update_text = f"🏁 {template_title}\nЗадачу взял {claimer_name}."
+    safe_title = escape_html(template_title)
+    safe_name = escape_html(claimer_name)
+    update_text = f"🏁 {safe_title}\nЗадачу взял {safe_name}."
     updated = 0
     for record in records:
         if record.user_id == claimer_user_id:
@@ -147,9 +150,11 @@ async def send_verification_requests(
 ) -> None:
     """Deliver verification photo to all reviewers and persist message ids."""
 
+    safe_title = escape_html(template_title)
+    safe_name = escape_html(performer_name)
     caption = (
-        f"Задача: {template_title}\n"
-        f"Исполнитель: {performer_name}. Подтверждаешь?"
+        f"Задача: {safe_title}\n"
+        f"Исполнитель: {safe_name}. Подтверждаешь?"
     )
     keyboard = verification_keyboard(task_id)
     delivered: list[BroadcastRecord] = []
@@ -191,10 +196,13 @@ async def update_verification_messages(
 ) -> None:
     """Update verification messages with the final verdict."""
 
+    safe_title = escape_html(template_title)
+    safe_name = escape_html(performer_name)
+    safe_verdict = escape_html(verdict_text)
     caption = (
-        f"Задача: {template_title}\n"
-        f"Исполнитель: {performer_name}.\n"
-        f"Результат: {verdict_text}"
+        f"Задача: {safe_title}\n"
+        f"Исполнитель: {safe_name}.\n"
+        f"Результат: {safe_verdict}"
     )
     updated = 0
     for record in broadcasts:

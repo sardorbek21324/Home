@@ -30,6 +30,7 @@ from ..domain.constants import CLAIM_REMINDER_MINUTES, VOTE_SECOND_WAIT_MINUTES
 from ..services.notifications import announce_task, update_verification_messages
 from ..services.scoring import calc_task_reward, missed_penalty, reward_for_completion
 from ..utils.telegram import safe_send_message
+from ..utils.text import escape_html
 from ..utils.time import (
     in_quiet_hours,
     next_allowed_moment,
@@ -394,6 +395,7 @@ class BotScheduler:
                 return True
             template = instance.template
             template_title = template.title
+            safe_title = escape_html(template_title)
             base_points = instance.effective_points or template.base_points
             claim_timeout = template.claim_timeout_minutes
             penalty_value = template.nobody_claimed_penalty if penalize else 0
@@ -419,11 +421,11 @@ class BotScheduler:
             session.flush()
 
         text = (
-            f"🧹 Задача: <b>{template_title}</b> (+{base_points}). "
+            f"🧹 Задача: <b>{safe_title}</b> (+{base_points}). "
             "Первый, кто нажмёт «Беру», забирает слот!"
         )
         if note:
-            text = f"{text}\n{note}"
+            text = f"{text}\n{escape_html(note)}"
         if penalty_value:
             text = f"{text}\n⚠️ Никто не взял вовремя — штраф {penalty_value} баллов."
 
@@ -526,10 +528,14 @@ class BotScheduler:
                         f"{title}: просрочено",
                         task_instance=inst,
                     )
+                    safe_title = escape_html(title)
                     notifications.append(
                         (
                             performer.tg_id,
-                            f"⏰ Срок по задаче «{title}» истёк. {abs(penalty_value)} баллов за просрочку.",
+                            (
+                                f"⏰ Срок по задаче «{safe_title}» истёк."
+                                f" {abs(penalty_value)} баллов за просрочку."
+                            ),
                         )
                     )
                 inst.status = TaskStatus.open
@@ -605,6 +611,7 @@ class BotScheduler:
             performer_tg_id = performer.tg_id if performer else None
             performer_name = performer.name if performer else ""
             template_title = instance.template.title
+            safe_title = escape_html(template_title)
             family = family_users(session)
             expected_votes = instance.round_no or len([u for u in family if not performer or u.id != performer.id])
             missing = max(expected_votes - (yes + no), 0)
@@ -621,7 +628,7 @@ class BotScheduler:
                     )
                 instance.status = TaskStatus.approved
                 instance.progress = 100
-                message = f"✅ {template_title} подтверждено. +{reward} баллов."
+                message = f"✅ {safe_title} подтверждено. +{reward} баллов."
                 verdict_text = "Отчёт принят ✅"
             else:
                 session.query(Vote).filter(Vote.task_instance_id == instance.id).delete(synchronize_session=False)
@@ -632,7 +639,7 @@ class BotScheduler:
                 if instance.report:
                     session.delete(instance.report)
                     instance.report = None
-                message = f"❌ {template_title} отклонено. Попробуй ещё раз!"
+                message = f"❌ {safe_title} отклонено. Попробуй ещё раз!"
                 verdict_text = "Отчёт отклонён ❌"
             broadcasts = list(pop_task_broadcasts(session, instance.id))
         self.cancel_vote_deadline(instance_id)
