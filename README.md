@@ -28,7 +28,7 @@
 4. Запустите бота:
 
    ```bash
-   python bot.py
+   python -m home_bot
    ```
 
 ## Команды
