@@ -28,12 +28,38 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Бот работает! ✅")
 
 
+async def user_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send the Telegram identifier of the requesting user."""
+    user = update.effective_user
+    if user is None:
+        logger.warning("Received /id command without an effective user")
+        return
+
+    await update.message.reply_text(
+        f"Твой Telegram ID: {user.id}"
+    )
+
+
+async def chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send the identifier of the current chat (group, supergroup, or channel)."""
+    chat = update.effective_chat
+    if chat is None:
+        logger.warning("Received /chatid command without an effective chat")
+        return
+
+    await update.message.reply_text(
+        f"ID этого чата: {chat.id}"
+    )
+
+
 def main() -> None:
     """Run the bot."""
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(CommandHandler("id", user_id))
+    application.add_handler(CommandHandler("chatid", chat_id))
 
     logger.info("Bot is starting. Waiting for commands…")
     application.run_polling()
