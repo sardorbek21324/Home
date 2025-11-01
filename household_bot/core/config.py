@@ -1,10 +1,11 @@
 """Application configuration using Pydantic settings."""
 from __future__ import annotations
 
+import json
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -24,6 +25,35 @@ class Settings(BaseSettings):
     TIMEZONE: ZoneInfo = Field(default_factory=lambda: ZoneInfo("Europe/Amsterdam"))
 
     GROCERY_DAY: int = 5
+
+    @field_validator("PARTICIPANT_IDS", mode="before")
+    @classmethod
+    def parse_participant_ids(cls, value: object) -> object:
+        """Allow comma-separated strings for participant IDs.
+
+        When sourced from the environment, ``PARTICIPANT_IDS`` may be supplied as a
+        comma-separated string (e.g. ``"1,2,3"``). Pydantic expects JSON for list
+        fields, so we normalise the string into a list of integers before normal
+        parsing. If the value is already a list or cannot be interpreted, we return
+        it unchanged and defer validation to Pydantic.
+        """
+
+        if isinstance(value, str):
+            stripped_value = value.strip()
+            if not stripped_value:
+                return []
+
+            try:
+                parsed = json.loads(stripped_value)
+            except json.JSONDecodeError:
+                parsed = [item.strip() for item in stripped_value.split(",")]
+            else:
+                if not isinstance(parsed, list):
+                    return parsed
+
+            return [int(item) for item in parsed if item]
+
+        return value
 
     class Config:
         env_file = ".env"
