@@ -9,7 +9,8 @@ def get_task_proposal_keyboard(task_id: int) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton("Сделаю сейчас", callback_data=f"accept:{task_id}"),
-                InlineKeyboardButton("Не смогу", callback_data=f"decline:{task_id}"),
-            ]
+                InlineKeyboardButton("Отложить", callback_data=f"postpone:{task_id}"),
+            ],
+            [InlineKeyboardButton("Не смогу", callback_data=f"decline:{task_id}")],
         ]
     )
