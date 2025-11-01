@@ -2,11 +2,35 @@
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+
+def _tolerant_json_loads(value: Any) -> Any:
+    """Return JSON-decoded value but fall back to the original input.
+
+    Pydantic's settings sources attempt to JSON-decode complex types such as
+    lists when reading from environment variables. For ``PARTICIPANT_IDS`` we
+    support simple comma-separated strings (e.g. ``"1,2,3"``). When such a
+    string is supplied, Pydantic's default ``json.loads`` invocation raises a
+    ``JSONDecodeError`` before our validators run. To keep backwards
+    compatibility, we catch that error here and return the raw value so that it
+    can be handled by the validator below.
+    """
+
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode()
+
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    return value
 
 
 class Settings(BaseSettings):
@@ -58,6 +82,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        json_loads = staticmethod(_tolerant_json_loads)
 
 
 settings = Settings()
