@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _tolerant_json_loads(value: Any) -> Any:
@@ -35,6 +35,12 @@ def _tolerant_json_loads(value: Any) -> Any:
 
 class Settings(BaseSettings):
     """Centralised configuration for the bot."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        json_loads=_tolerant_json_loads,
+    )
 
     TELEGRAM_TOKEN: str
     ADMIN_ID: int = 133405512
@@ -78,11 +84,5 @@ class Settings(BaseSettings):
             return [int(item) for item in parsed if item]
 
         return value
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        json_loads = staticmethod(_tolerant_json_loads)
-
 
 settings = Settings()
