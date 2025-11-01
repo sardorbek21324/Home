@@ -2,11 +2,49 @@
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+from typing import Any, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, field_validator
+from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import (
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+)
+
+
+class _FlexibleEnvSettingsSource(EnvSettingsSource):
+    """Environment source that tolerates non-JSON list representations."""
+
+    def decode_complex_value(
+        self, field_name: str, field: FieldInfo, value: Any
+    ) -> Any:
+        """Fallback to returning the raw value if JSON decoding fails.
+
+        Pydantic tries to decode complex values (like lists) as JSON before
+        validators are executed. For ``PARTICIPANT_IDS`` we want to allow plain
+        comma-separated strings (``"1,2,3"``). By catching ``JSONDecodeError``
+        and returning the raw string we give our field validator a chance to
+        normalise it.
+        """
+
+        if field_name == "PARTICIPANT_IDS" and isinstance(value, str):
+            try:
+                return super().decode_complex_value(field_name, field, value)
+            except ValueError:
+                return value
+
+        return super().decode_complex_value(field_name, field, value)
+
+
+class _FlexibleDotEnvSettingsSource(DotEnvSettingsSource, _FlexibleEnvSettingsSource):
+    """Dotenv source sharing the fallback behaviour."""
+
+    pass
+
+
 class Settings(BaseSettings):
     """Centralised configuration for the bot."""
 
@@ -14,6 +52,37 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> Tuple[PydanticBaseSettingsSource, ...]:
+        """Inject custom sources that keep participant IDs flexible."""
+
+        env_prefix = cls.model_config.get("env_prefix")
+        env_nested_delimiter = cls.model_config.get("env_nested_delimiter")
+        env_file = cls.model_config.get("env_file")
+        env_file_encoding = cls.model_config.get("env_file_encoding")
+
+        custom_env = _FlexibleEnvSettingsSource(
+            settings_cls,
+            env_prefix=env_prefix,
+            env_nested_delimiter=env_nested_delimiter,
+        )
+        custom_dotenv = _FlexibleDotEnvSettingsSource(
+            settings_cls,
+            env_file=env_file,
+            env_file_encoding=env_file_encoding,
+            env_prefix=env_prefix,
+            env_nested_delimiter=env_nested_delimiter,
+        )
+
+        return init_settings, custom_env, custom_dotenv, file_secret_settings
 
     TELEGRAM_TOKEN: str
     ADMIN_ID: int = 133405512
