@@ -6,6 +6,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 from household_bot.bot.callbacks.task_callbacks import (
     handle_task_accept,
     handle_task_decline,
+    handle_task_postpone,
 )
 from household_bot.bot.commands.admin import admin_panel, force_task
 from household_bot.bot.commands.start import start
@@ -23,6 +24,9 @@ def register_handlers(application: Application) -> None:
 
     application.add_handler(
         CallbackQueryHandler(_build_accept_handler(), pattern=r"^accept:\d+")
+    )
+    application.add_handler(
+        CallbackQueryHandler(_build_postpone_handler(), pattern=r"^postpone:\d+")
     )
     application.add_handler(
         CallbackQueryHandler(_build_decline_handler(), pattern=r"^decline:\d+")
@@ -50,5 +54,14 @@ def _build_decline_handler():
         task_id = _extract_task_id(update.callback_query.data if update.callback_query else None)
         if task_id >= 0:
             await handle_task_decline(update, context, task_id)
+
+    return _handler
+
+
+def _build_postpone_handler():
+    async def _handler(update, context):
+        task_id = _extract_task_id(update.callback_query.data if update.callback_query else None)
+        if task_id >= 0:
+            await handle_task_postpone(update, context, task_id)
 
     return _handler

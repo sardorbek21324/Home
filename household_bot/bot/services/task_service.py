@@ -27,6 +27,61 @@ TASK_POINTS = {
     "Помыть санузел": {"success": 20, "failure": -12},
 }
 
+TASK_MESSAGES = {
+    "Приготовить завтрак": "🍳 Пора готовить завтрак! Кто возьмёт? +{points} баллов",
+    "Приготовить обед": "🍳 Пора готовить обед! Кто возьмёт? +{points} баллов",
+    "Приготовить ужин": "🍳 Пора готовить ужин! Кто возьмёт? +{points} баллов",
+    "Загрузить посудомойку": "🧼 Кто уберёт кухню и стол? +{points} баллов",
+    "Пропылесосить дом": "🧹 Кто пропылесосит дом? +{points} баллов",
+    "Убраться дома": "🧼 Кто наведёт порядок дома? +{points} баллов",
+    "Помыть шторы": "🧺 Пора помыть шторы! Кто возьмётся? +{points} баллов",
+    "Купить продукты": "🛒 Пора купить продукты! Кто сделает? +{points} баллов",
+    "Помыть санузел": "🧽 Нужно помыть санузел. Кто возьмётся? +{points} баллов",
+}
+
+
+def _render_task_message(task_name: str, success_points: int) -> str:
+    template = TASK_MESSAGES.get(task_name)
+    if template:
+        return template.format(points=success_points)
+    return f"Новая задача: {task_name}. +{success_points} баллов"
+
+
+def _schedule_followup_jobs(application: Application, task_id: int) -> None:
+    job_queue = application.job_queue
+    job_queue.run_once(
+        handle_no_reaction,
+        when=timedelta(minutes=5),
+        data={"task_id": task_id},
+        name=f"quick_timer_{task_id}",
+    )
+    job_queue.run_once(
+        handle_total_silence,
+        when=timedelta(minutes=30),
+        data={"task_id": task_id},
+        name=f"hard_timer_{task_id}",
+    )
+
+
+async def _announce_task(
+    bot: Bot,
+    application: Application,
+    task_id: int,
+    task_name: str,
+) -> None:
+    points = TASK_POINTS.get(task_name)
+    if not points:
+        logging.error("No points configured for task '%s'", task_name)
+        return
+
+    await bot.send_message(
+        chat_id=settings.GROUP_CHAT_ID,
+        text=_render_task_message(task_name, points["success"]),
+        reply_markup=get_task_proposal_keyboard(task_id),
+    )
+
+    _schedule_followup_jobs(application, task_id)
+
 
 async def create_and_propose_task(
     bot: Bot,
@@ -37,34 +92,9 @@ async def create_and_propose_task(
     """Create a task and propose it to the group chat."""
     async with get_session() as session:
         repo = DBRepository(session)
-        points = TASK_POINTS.get(task_name)
-        if not points:
-            logging.error("No points configured for task '%s'", task_name)
-            return
-
         new_task = await repo.create_task(name=task_name, category=category)
 
-    await bot.send_message(
-        chat_id=settings.GROUP_CHAT_ID,
-        text=(
-            f"🍳 Пора {task_name.lower()}! Кто возьмёт? +{points['success']} баллов"
-        ),
-        reply_markup=get_task_proposal_keyboard(new_task.id),
-    )
-
-    job_queue = application.job_queue
-    job_queue.run_once(
-        handle_no_reaction,
-        when=timedelta(minutes=5),
-        data={"task_id": new_task.id},
-        name=f"quick_timer_{new_task.id}",
-    )
-    job_queue.run_once(
-        handle_total_silence,
-        when=timedelta(minutes=30),
-        data={"task_id": new_task.id},
-        name=f"hard_timer_{new_task.id}",
-    )
+    await _announce_task(bot, application, new_task.id, task_name)
 
 
 async def handle_no_reaction(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -138,3 +168,25 @@ async def ask_for_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 chat_id=settings.GROUP_CHAT_ID,
                 text=f"{mention}, как продвигается задача '{task.name}'?",
             )
+
+
+async def reannounce_task(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Re-send a postponed task back to the chat."""
+    job = context.job
+    if job is None:
+        return
+    task_id = job.data["task_id"]
+
+    async with get_session() as session:
+        repo = DBRepository(session)
+        task = await repo.get_task(task_id)
+        if not task or task.status != TaskStatus.PENDING:
+            return
+        task_name = task.name
+
+    application = context.application
+    if application is None:
+        logging.error("Application context missing for task %s reannounce", task_id)
+        return
+
+    await _announce_task(context.bot, application, task_id, task_name)
